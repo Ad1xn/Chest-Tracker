@@ -16,10 +16,10 @@ plugins {
 stonecutter {
     kotlinController = true
     shared {
-        // One shared build.gradle.kts; the few per-version differences are
-        // branched inside it on the Minecraft version.
-        version("1.21.11", "1.21.11")
-        version("26.2", "26.2")
+        // Separate buildscripts because the two eras need different Loom
+        // versions, which a plugins{} block cannot select conditionally.
+        version("1.21.11", "1.21.11").buildscript("build-obfuscated.gradle.kts")
+        version("26.2", "26.2").buildscript("build-native.gradle.kts")
     }
     create(rootProject)
 }
