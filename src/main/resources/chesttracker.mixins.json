@@ -3,8 +3,13 @@
   "minVersion": "0.8",
   "package": "dev.adrian.chesttracker.mixin",
   "compatibilityLevel": "JAVA_21",
-  "mixins": [],
+  "mixins": [
+    "LevelMixin",
+    "BlockMixin"
+  ],
   "client": [],
   "server": [],
-  "injectors": { "defaultRequire": 1 }
+  "injectors": {
+    "defaultRequire": 1
+  }
 }
