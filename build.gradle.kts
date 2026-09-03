@@ -13,6 +13,17 @@ plugins {
 
 val mcVersion = stonecutter.current.version
 val toolchainJava = (property("mod.java") as String).toInt()
+
+// Supported targets differ only in whether Fabric intermediary exists:
+//   1.21.11   no intermediary remap needed, but Fabric API still ships
+//             intermediary-namespace transitive access wideners
+//   >= 26.1   no intermediary published at all
+//
+// Older 1.21.x (1.21.8 and down) is NOT buildable from this script: Loom
+// 1.17.20 reports even 1.21.8 as a "non-obfuscated environment" and refuses
+// both officialMojangMappings() and createRemapConfigurations(), so it cannot
+// handle pre-1.21.11 versions. Adding one would mean a second Stonecutter
+// buildscript pinned to an older Loom (~1.14) using Mojang mappings.
 val hasIntermediary = stonecutter.eval(mcVersion, "<26.1")
 
 version = "${property("mod.version")}+$mcVersion"
