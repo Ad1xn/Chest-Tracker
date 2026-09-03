@@ -8,11 +8,15 @@ import dev.adrian.chesttracker.core.index.SearchResult;
 import dev.adrian.chesttracker.core.index.WorldIndex;
 import dev.adrian.chesttracker.core.util.BlockKey;
 import dev.adrian.chesttracker.server.scan.LiveScanner;
+import dev.adrian.chesttracker.server.scan.RegionScanner;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.level.storage.LevelResource;
+
+import java.nio.file.Path;
 
 import java.util.HashSet;
 import java.util.List;
@@ -39,6 +43,10 @@ public final class ChestTrackerCommands {
                         .then(Commands.argument("chunkRadius", IntegerArgumentType.integer(0, 64))
                                 .executes(ctx -> scan(ctx.getSource(),
                                         IntegerArgumentType.getInteger(ctx, "chunkRadius")))))
+                .then(Commands.literal("scanworld")
+                        .executes(ctx -> scanWorld(ctx.getSource()))
+                        .then(Commands.literal("cancel")
+                                .executes(ctx -> cancelScan(ctx.getSource()))))
                 .then(Commands.literal("stats")
                         .executes(ctx -> stats(ctx.getSource())))
                 .then(Commands.literal("find")
@@ -67,12 +75,68 @@ public final class ChestTrackerCommands {
         return result.containersFound();
     }
 
+    /**
+     * Starts the background region scan: the whole world, including chunks that
+     * are not loaded and never have been.
+     */
+    private static int scanWorld(CommandSourceStack source) throws com.mojang.brigadier.exceptions.CommandSyntaxException {
+        requireTracker(source);
+        RegionScanner scanner = Trackers.regionScanner();
+        var server = Trackers.server();
+        if (scanner == null || server == null) {
+            source.sendFailure(Component.literal("ChestTracker is not active on this world."));
+            return 0;
+        }
+        if (scanner.isRunning()) {
+            source.sendFailure(Component.literal(
+                    "A scan is already running. Use /chesttracker scanworld cancel to stop it."));
+            return 0;
+        }
+
+        Path worldRoot = server.getWorldPath(LevelResource.ROOT);
+        long tick = source.getLevel().getGameTime();
+        if (!scanner.start(worldRoot, tick)) {
+            source.sendFailure(Component.literal("Could not start the scan."));
+            return 0;
+        }
+
+        source.sendSuccess(() -> Component.literal(
+                "Scanning the world in the background. It reads region files directly, so "
+                + "unloaded chunks are included. Check /chesttracker stats for progress."), false);
+        return 1;
+    }
+
+    private static int cancelScan(CommandSourceStack source) {
+        RegionScanner scanner = Trackers.regionScanner();
+        if (scanner == null || !scanner.isRunning()) {
+            source.sendFailure(Component.literal("No scan is running."));
+            return 0;
+        }
+        scanner.cancel();
+        source.sendSuccess(() -> Component.literal("Scan cancelled."), false);
+        return 1;
+    }
+
     private static int stats(CommandSourceStack source) throws com.mojang.brigadier.exceptions.CommandSyntaxException {
         TrackerService tracker = requireTracker(source);
 
         source.sendSuccess(() -> Component.literal(
                 "ChestTracker: " + tracker.totalContainers() + " containers across "
                         + tracker.dimensions().size() + " dimension(s)"), false);
+
+        RegionScanner scanner = Trackers.regionScanner();
+        if (scanner != null) {
+            RegionScanner.Progress progress = scanner.progress();
+            if (progress.running() || progress.regionsRead() > 0) {
+                source.sendSuccess(() -> Component.literal(String.format(
+                        "  %s region scan: %d/%d regions, %d chunks read, %d containers, "
+                        + "%d skipped (loaded), %d unreadable, %d queued",
+                        progress.running() ? "Running" : "Finished",
+                        progress.regionsRead(), progress.regionsTotal(), progress.chunksRead(),
+                        progress.containersFound(), progress.chunksSkippedLoaded(),
+                        progress.chunksFailed(), scanner.queuedBatches())), false);
+            }
+        }
 
         for (String dimensionId : tracker.dimensions()) {
             WorldIndex.Stats stats = tracker.index(dimensionId).stats();
@@ -96,11 +160,20 @@ public final class ChestTrackerCommands {
         }
 
         var origin = player.blockPosition();
-        List<SearchResult> results = tracker.search(dimensionId, IndexQuery.builder()
+        IndexQuery query = IndexQuery.builder()
                 .items(itemIds)
                 .center(BlockKey.pack(origin.getX(), origin.getY(), origin.getZ()))
                 .limit(MAX_RESULTS)
-                .build());
+                .build();
+
+        // Re-read any candidate whose chunk is loaded before showing it. Contents
+        // in an unloaded chunk cannot have changed; contents in a loaded one can,
+        // and a stale result is the failure that costs the mod its credibility.
+        LiveScanner refresher = new LiveScanner(tracker);
+        for (SearchResult candidate : tracker.search(dimensionId, query)) {
+            refresher.refreshIfLoaded(player.level(), dimensionId, candidate.container().pos());
+        }
+        List<SearchResult> results = tracker.search(dimensionId, query);
 
         if (results.isEmpty()) {
             source.sendFailure(Component.literal("No indexed container holds that."));

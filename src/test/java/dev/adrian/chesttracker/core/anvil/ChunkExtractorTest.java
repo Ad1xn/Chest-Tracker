@@ -70,6 +70,24 @@ class ChunkExtractorTest {
     }
 
     @Test
+    void unlootedContainersReportUnknownContentsRatherThanEmpty() throws IOException {
+        // A generated chest nobody has opened has no Items on disk: its loot does
+        // not exist until it is opened. Reporting "empty" would be a lie, and it
+        // must contribute nothing to the item index.
+        NbtCompound chunk = parse(NbtTestWriter.compound()
+                .put("block_entities", List.of(blockEntity("minecraft:chest", 0, 40, 0)
+                        .put("LootTable", "minecraft:chests/simple_dungeon"))));
+
+        ContainerRecord record = ChunkExtractor.extract(
+                chunk, Set.of("minecraft:chest"), 0, palette, 0L).containers().get(0);
+
+        assertTrue(record.unlooted());
+        assertFalse(record.contentsKnown(), "an unrolled loot chest must not claim to be empty");
+        assertTrue(record.contents().isEmpty());
+        assertFalse(record.isEmpty(), "isEmpty() means known-and-empty, which this is not");
+    }
+
+    @Test
     void flattensShulkerContentsWithDepth() throws IOException {
         NbtTestWriter.Compound shulker = item("minecraft:shulker_box", 1)
                 .put("components", NbtTestWriter.compound()

@@ -74,7 +74,8 @@ public final class LiveScanner {
         return new ScanResult(scanned, skipped, found, removed);
     }
 
-    private record ChunkScan(int found, int removed) {}
+    /** Public because the chunk-unload hook calls scanChunk directly. */
+    public record ChunkScan(int found, int removed) {}
 
     /** Indexes one loaded chunk and reconciles it against what is really there. */
     public ChunkScan scanChunk(ServerLevel level, LevelChunk chunk, String dimensionId) {
@@ -105,6 +106,39 @@ public final class LiveScanner {
         long chunkKey = BlockKey.chunkKey(ChunkPosCompat.x(chunk.getPos()), ChunkPosCompat.z(chunk.getPos()));
         int removed = tracker.reconcileChunk(dimensionId, chunkKey, actual);
         return new ChunkScan(found, removed);
+    }
+
+    /**
+     * Re-reads one container if its chunk is loaded, so a result is never shown
+     * with stale contents.
+     *
+     * <p>This is what makes staleness invisible where it matters. Contents in an
+     * unloaded chunk cannot have changed since we last saw them, and contents in
+     * a loaded chunk are re-read here, for the handful of containers actually
+     * about to be displayed.
+     *
+     * @return true if a container is still there, false if it is gone (in which
+     *         case it has also been dropped from the index)
+     */
+    public boolean refreshIfLoaded(ServerLevel level, String dimensionId, long pos) {
+        int x = BlockKey.x(pos);
+        int y = BlockKey.y(pos);
+        int z = BlockKey.z(pos);
+        if (!level.getChunkSource().hasChunk(x >> 4, z >> 4)) {
+            return true; // Unloaded: frozen, so what we have is still true.
+        }
+
+        BlockPos blockPos = new BlockPos(x, y, z);
+        BlockEntity blockEntity = level.getBlockEntity(blockPos);
+        if (blockEntity == null || !ContainerTypes.isContainer(blockEntity)) {
+            tracker.remove(dimensionId, pos);
+            return false;
+        }
+
+        String typeId = ContainerTypes.idOf(blockEntity);
+        if (typeId == null) return true;
+        tracker.record(dimensionId, toRecord(blockEntity, pos, typeId, dimensionId, level.getGameTime()));
+        return true;
     }
 
     private ContainerRecord toRecord(BlockEntity blockEntity, long pos, String typeId,

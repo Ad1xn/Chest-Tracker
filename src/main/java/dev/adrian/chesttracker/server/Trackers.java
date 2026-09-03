@@ -27,14 +27,44 @@ import java.util.concurrent.ConcurrentHashMap;
 public final class Trackers {
 
     private static volatile TrackerService current;
+    private static volatile net.minecraft.server.MinecraftServer server;
+    private static volatile dev.adrian.chesttracker.server.scan.RegionScanner regionScanner;
 
     /** Dimension ids are needed on a hot path; building the string each time is not free. */
     private static final Map<ResourceKey<Level>, String> DIMENSION_IDS = new ConcurrentHashMap<>();
 
     private Trackers() {}
 
-    public static void setCurrent(TrackerService service) {
+    public static void setCurrent(TrackerService service, net.minecraft.server.MinecraftServer minecraftServer) {
         current = service;
+        server = minecraftServer;
+        regionScanner = new dev.adrian.chesttracker.server.scan.RegionScanner(service);
+    }
+
+    public static net.minecraft.server.MinecraftServer server() {
+        return server;
+    }
+
+    public static dev.adrian.chesttracker.server.scan.RegionScanner regionScanner() {
+        return regionScanner;
+    }
+
+    /** Whether a chunk is loaded, keyed the way the region scanner asks. */
+    public static boolean isChunkLoaded(String dimensionId, long chunkKey) {
+        net.minecraft.server.MinecraftServer current = server;
+        if (current == null) return false;
+        ServerLevel level = levelFor(dimensionId);
+        return level != null && level.getChunkSource()
+                .hasChunk(BlockKey.chunkX(chunkKey), BlockKey.chunkZ(chunkKey));
+    }
+
+    public static ServerLevel levelFor(String dimensionId) {
+        net.minecraft.server.MinecraftServer current = server;
+        if (current == null) return null;
+        for (ServerLevel level : current.getAllLevels()) {
+            if (dimensionId(level).equals(dimensionId)) return level;
+        }
+        return null;
     }
 
     public static TrackerService current() {
@@ -42,6 +72,9 @@ public final class Trackers {
     }
 
     public static void clear() {
+        if (regionScanner != null) regionScanner.cancel();
+        regionScanner = null;
+        server = null;
         current = null;
         DIMENSION_IDS.clear();
     }

@@ -5,6 +5,7 @@ import dev.adrian.chesttracker.core.index.IndexQuery;
 import dev.adrian.chesttracker.core.index.SearchResult;
 import dev.adrian.chesttracker.core.index.WorldIndex;
 import dev.adrian.chesttracker.core.model.ContainerRecord;
+import dev.adrian.chesttracker.core.model.StackEntry;
 import dev.adrian.chesttracker.core.store.IndexCodec;
 import dev.adrian.chesttracker.core.store.StringPalette;
 import dev.adrian.chesttracker.platform.ContainerTypes;
@@ -122,27 +123,40 @@ public final class TrackerService {
 
     /** Rewrites a loaded snapshot's palette ids into this service's palette. */
     private WorldIndex reindex(IndexCodec.Snapshot snapshot, String dimensionId) {
-        StringPalette filePalette = snapshot.palette();
         WorldIndex target = new WorldIndex(palette.intern(dimensionId));
-
         for (ContainerRecord record : snapshot.index().all()) {
-            String typeId = filePalette.value(record.typeId());
-            if (typeId == null) continue;
-
-            List<dev.adrian.chesttracker.core.model.StackEntry> contents = record.contents().stream()
-                    .map(entry -> {
-                        String itemId = filePalette.value(entry.itemId());
-                        return itemId == null ? null : new dev.adrian.chesttracker.core.model.StackEntry(
-                                palette.intern(itemId), entry.count(), entry.depth(), entry.customName());
-                    })
-                    .filter(java.util.Objects::nonNull)
-                    .toList();
-
-            target.put(new ContainerRecord(record.pos(), palette.intern(dimensionId), palette.intern(typeId),
-                    record.origin(), record.owner(), record.unlooted(), record.contentsKnown(),
-                    record.customName(), record.lastSeenTick(), contents));
+            ContainerRecord remapped = remap(record, snapshot.palette(), dimensionId);
+            if (remapped != null) target.put(remapped);
         }
         return target;
+    }
+
+    /**
+     * Translates a record built against a foreign palette into ours.
+     *
+     * <p>Needed in two places, for the same underlying reason: palette ids are
+     * only meaningful next to the palette that produced them. A saved file has
+     * its own, and so does a background scan - the scanner cannot intern into
+     * the shared palette because {@link StringPalette} is not thread-safe and
+     * the server thread is using it.
+     *
+     * @return the translated record, or null if the source palette was missing
+     *         an id it referenced (a corrupt file, not a fatal condition)
+     */
+    public ContainerRecord remap(ContainerRecord record, StringPalette from, String dimensionId) {
+        String typeId = from.value(record.typeId());
+        if (typeId == null) return null;
+
+        List<StackEntry> contents = new java.util.ArrayList<>(record.contents().size());
+        for (StackEntry entry : record.contents()) {
+            String itemId = from.value(entry.itemId());
+            if (itemId == null) continue;
+            contents.add(new StackEntry(palette.intern(itemId), entry.count(), entry.depth(), entry.customName()));
+        }
+
+        return new ContainerRecord(record.pos(), palette.intern(dimensionId), palette.intern(typeId),
+                record.origin(), record.owner(), record.unlooted(), record.contentsKnown(),
+                record.customName(), record.lastSeenTick(), contents);
     }
 
     public void save() {

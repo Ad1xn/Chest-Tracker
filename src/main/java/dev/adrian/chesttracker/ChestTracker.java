@@ -5,7 +5,11 @@ import dev.adrian.chesttracker.server.TrackerService;
 import dev.adrian.chesttracker.server.Trackers;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
+import dev.adrian.chesttracker.server.scan.LiveScanner;
+import dev.adrian.chesttracker.server.scan.RegionScanner;
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerChunkEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.minecraft.world.level.storage.LevelResource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -27,7 +31,7 @@ public final class ChestTracker implements ModInitializer {
             TrackerService tracker = new TrackerService(
                     server.getWorldPath(LevelResource.ROOT).resolve("data").resolve(MOD_ID));
             tracker.load();
-            Trackers.setCurrent(tracker);
+            Trackers.setCurrent(tracker, server);
             LOG.info("ChestTracker ready: {} containers restored", tracker.totalContainers());
         });
 
@@ -38,6 +42,23 @@ public final class ChestTracker implements ModInitializer {
                 LOG.info("ChestTracker saved {} containers", tracker.totalContainers());
             }
             Trackers.clear();
+        });
+
+        // Applying scan results happens here, on the server thread, under a
+        // per-tick budget. The scanner thread only ever reads and parses.
+        ServerTickEvents.END_SERVER_TICK.register(server -> {
+            RegionScanner scanner = Trackers.regionScanner();
+            if (scanner == null) return;
+            long tickNanos = (long) (server.getCurrentSmoothedTickTime() * 1_000_000.0f);
+            scanner.drain(Trackers::isChunkLoaded, tickNanos);
+        });
+
+        // A chunk about to unload is frozen from here on, so this is the one
+        // moment its contents are worth capturing: exactly once, and final.
+        ServerChunkEvents.CHUNK_UNLOAD.register((world, chunk) -> {
+            TrackerService tracker = Trackers.current();
+            if (tracker == null) return;
+            new LiveScanner(tracker).scanChunk(world, chunk, Trackers.dimensionId(world));
         });
 
         CommandRegistrationCallback.EVENT.register(
