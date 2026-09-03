@@ -1,0 +1,50 @@
+name: build
+
+# Both targets build on every push. Dual-version support is only real if CI
+# proves it; this workflow is what keeps 1.21.11 and 26.2 from drifting apart.
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [ "1.21.11", "26.2" ]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDKs
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          # 25 is listed last on purpose: setup-java points JAVA_HOME at the last
+          # entry, and Loom validates the *Gradle JVM* itself - building the 26.2
+          # target on anything older fails with "Minecraft 26.2 requires Java 25".
+          # 21 is still installed so Gradle can use it as the compile toolchain
+          # for the 1.21.11 target.
+          java-version: |
+            21
+            25
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Build ${{ matrix.target }}
+        run: ./gradlew ":${{ matrix.target }}:build" --stacktrace
+
+      - name: Upload jar
+        uses: actions/upload-artifact@v4
+        with:
+          name: chesttracker-${{ matrix.target }}
+          path: versions/${{ matrix.target }}/build/libs/*.jar
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ matrix.target }}
+          path: versions/${{ matrix.target }}/build/test-results/

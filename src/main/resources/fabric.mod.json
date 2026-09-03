@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "id": "${mod_id}",
+  "version": "${version}",
+  "name": "${mod_name}",
+  "description": "Indexes every container in the world within a configurable radius - including chunks that are not loaded - so you can search your storage without opening a single chest. Works in singleplayer, on modded servers, and degrades gracefully on vanilla servers.",
+  "authors": [ "adrian" ],
+  "license": "MIT",
+  "environment": "*",
+  "entrypoints": {
+    "main": [ "dev.adrian.chesttracker.ChestTracker" ],
+    "client": [ "dev.adrian.chesttracker.client.ChestTrackerClient" ],
+    "server": [ "dev.adrian.chesttracker.server.ChestTrackerServer" ]
+  },
+  "mixins": [ "chesttracker.mixins.json" ],
+  "depends": {
+    "fabricloader": ">=${loader_dep}",
+    "minecraft": "${mc_dep}",
+    "java": ">=${java_dep}",
+    "fabric-api": "*"
+  }
+}
