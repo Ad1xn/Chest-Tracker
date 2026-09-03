@@ -9,6 +9,18 @@ you've physically opened them.
 
 Fabric · Minecraft **1.21.11** and **26.2**
 
+### Supported versions
+
+**1.21.11 and newer.** Both current targets sit in Minecraft's unobfuscated era, so adding another
+release from it (26.1, a future 26.3) is a one-line entry in `settings.gradle.kts` plus a
+`versions/<mc>/gradle.properties` file.
+
+**Below 1.21.11 is not supported and is not a small change.** Fabric Loom 1.17 reports even 1.21.8 as
+a non-obfuscated environment and refuses both `officialMojangMappings()` and
+`createRemapConfigurations()`, so it cannot build those versions at all. Supporting one would mean a
+second Stonecutter buildscript pinned to an older Loom (~1.14) with Mojang mappings and the remap
+configurations — a parallel build path to maintain, not a version bump.
+
 ## What it does
 
 - **Indexes the whole world, not your render distance.** A background scanner reads region files
