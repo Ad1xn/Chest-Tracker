@@ -63,6 +63,7 @@ public final class ChestTracker implements ModInitializer {
                 LOG.info("ChestTracker saved {} containers", tracker.totalContainers());
             }
             Trackers.clear();
+            ChestTrackerNetwork.forgetAll();
         });
 
         // Applying scan results happens here, on the server thread, under a
@@ -72,6 +73,11 @@ public final class ChestTracker implements ModInitializer {
             // index only learns contents when a chunk unloads, so filling a chest
             // you just placed would never show up.
             Trackers.drainDirty();
+
+            // Tell anyone with the screen open that what they are looking at
+            // has moved. Rate-limited inside; the drain above is what makes the
+            // change worth reporting.
+            ChestTrackerNetwork.flushChanges(server);
 
             RegionScanner scanner = Trackers.regionScanner();
             if (scanner == null) return;

@@ -13,6 +13,7 @@ import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * The client's side of the wire: what the server is, and what we asked it.
@@ -53,6 +54,14 @@ public final class ServerLink {
     private static volatile long joinedAt;
 
     /**
+     * Bumped each time the server says the index moved.
+     *
+     * <p>The screen compares it rather than being called back, so a signal that
+     * arrives while no screen is open costs nothing and cannot leak a listener.
+     */
+    private static final AtomicLong CHANGE_TOKEN = new AtomicLong();
+
+    /**
      * One unanswered request.
      *
      * <p>{@code type} is carried so a reply can be checked against what was
@@ -88,6 +97,10 @@ public final class ServerLink {
                 ChestTrackerPayloads.ContainerResponsePayload.TYPE,
                 (payload, context) -> deliver(payload.response().requestId(), payload.response()));
 
+        ClientPlayNetworking.registerGlobalReceiver(
+                ChestTrackerPayloads.IndexChangedPayload.TYPE,
+                (payload, context) -> CHANGE_TOKEN.incrementAndGet());
+
         ClientPlayConnectionEvents.JOIN.register((handler, sender, client) -> {
             // Every connection starts over: the last server's answer says
             // nothing about this one.
@@ -108,6 +121,23 @@ public final class ServerLink {
 
     public static State state() {
         return state;
+    }
+
+    /** Changes when the server reports the index has moved. */
+    public static long changeToken() {
+        return CHANGE_TOKEN.get();
+    }
+
+    /**
+     * Tells the server whether this client is watching.
+     *
+     * <p>Sent on opening and closing the screen, so the server pushes only to
+     * the few players who would see it.
+     */
+    public static void setWatching(boolean watching) {
+        if (state != State.PRESENT) return;
+        if (!ClientPlayNetworking.canSend(ChestTrackerPayloads.SubscribePayload.TYPE)) return;
+        ClientPlayNetworking.send(new ChestTrackerPayloads.SubscribePayload(watching));
     }
 
     /** True once we know the server is there and this player is allowed to ask. */

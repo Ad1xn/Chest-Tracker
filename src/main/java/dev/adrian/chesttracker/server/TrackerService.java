@@ -17,6 +17,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Owns the index for one world: a {@link WorldIndex} per dimension, the shared
@@ -32,6 +34,19 @@ public final class TrackerService {
     private final Map<String, WorldIndex> byDimension = new HashMap<>();
     private final ContainerTypes containerTypes = new ContainerTypes();
     private final Path storageRoot;
+
+    /**
+     * Bumped whenever a dimension's index actually changes.
+     *
+     * <p>Lets anything watching ask "is what I am showing still current" for
+     * the cost of a long comparison, instead of re-running a query to find out.
+     *
+     * <p>Concurrent because it is read off the render thread - the client's
+     * screen compares it every frame - while only the server thread writes it.
+     * The index itself stays single-threaded; this is the one value that
+     * crosses.
+     */
+    private final Map<String, AtomicLong> generations = new ConcurrentHashMap<>();
 
     public TrackerService(Path storageRoot) {
         this.storageRoot = storageRoot;
@@ -55,12 +70,35 @@ public final class TrackerService {
         return Set.copyOf(byDimension.keySet());
     }
 
+    /** How many times this dimension's index has changed. */
+    public long generation(String dimensionId) {
+        AtomicLong counter = generations.get(dimensionId);
+        return counter == null ? 0L : counter.get();
+    }
+
+    private void bump(String dimensionId) {
+        generations.computeIfAbsent(dimensionId, id -> new AtomicLong()).incrementAndGet();
+    }
+
+    /**
+     * Records a container, and reports a change only if it says something new.
+     *
+     * <p>Re-reads are constant - the live drain refreshes dirty containers
+     * every tick - and each one writes a fresh {@code lastSeenTick}. Counting
+     * those as changes would leave the generation climbing permanently, so
+     * anything watching it would see "changed" forever and the signal would
+     * mean nothing.
+     */
     public void record(String dimensionId, ContainerRecord container) {
+        ContainerRecord previous = index(dimensionId).get(container.pos());
         index(dimensionId).put(container);
+        if (previous == null || !previous.sameDataAs(container)) bump(dimensionId);
     }
 
     public ContainerRecord remove(String dimensionId, long pos) {
-        return index(dimensionId).remove(pos);
+        ContainerRecord removed = index(dimensionId).remove(pos);
+        if (removed != null) bump(dimensionId);
+        return removed;
     }
 
     /**
@@ -74,7 +112,9 @@ public final class TrackerService {
      * @return how many stale records were dropped
      */
     public int reconcileChunk(String dimensionId, long chunkKey, Set<Long> actual) {
-        return index(dimensionId).reconcileChunk(chunkKey, actual);
+        int dropped = index(dimensionId).reconcileChunk(chunkKey, actual);
+        if (dropped > 0) bump(dimensionId);
+        return dropped;
     }
 
     public List<SearchResult> search(String dimensionId, IndexQuery query) {

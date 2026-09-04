@@ -9,7 +9,12 @@ import dev.adrian.chesttracker.server.TrackerService;
 import dev.adrian.chesttracker.server.Trackers;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
+
+import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Registration and the server half of the protocol.
@@ -21,6 +26,30 @@ import net.minecraft.server.level.ServerPlayer;
  */
 public final class ChestTrackerNetwork {
 
+    /**
+     * How often watching clients may be told the index moved.
+     *
+     * <p>A region scan applies thousands of records and an item sorter fires
+     * many times a second, so the raw change rate is far higher than anything
+     * worth redrawing. Twice a second reads as live and costs one query per
+     * watcher at most.
+     */
+    private static final int SIGNAL_INTERVAL_TICKS = 10;
+
+    /**
+     * Players with the search screen open, and the index generation each was
+     * last told about.
+     *
+     * <p>Keyed by uuid rather than holding the player: a {@code ServerPlayer}
+     * is replaced on respawn and on a dimension change, so a held reference
+     * would go stale and keep the old one alive.
+     */
+    private static final Map<UUID, Watcher> WATCHERS = new ConcurrentHashMap<>();
+
+    private record Watcher(String dimensionId, long generation) {}
+
+    private static int sinceLastSignal;
+
     private ChestTrackerNetwork() {}
 
     /** Runs on client and server alike, from the common entrypoint. */
@@ -31,6 +60,9 @@ public final class ChestTrackerNetwork {
         NetworkCompat.playC2S().register(
                 ChestTrackerPayloads.ContainerRequestPayload.TYPE,
                 ChestTrackerPayloads.ContainerRequestPayload.CODEC);
+        NetworkCompat.playC2S().register(
+                ChestTrackerPayloads.SubscribePayload.TYPE,
+                ChestTrackerPayloads.SubscribePayload.CODEC);
 
         NetworkCompat.playS2C().register(
                 ChestTrackerPayloads.SummaryResponsePayload.TYPE,
@@ -38,6 +70,9 @@ public final class ChestTrackerNetwork {
         NetworkCompat.playS2C().register(
                 ChestTrackerPayloads.ContainerResponsePayload.TYPE,
                 ChestTrackerPayloads.ContainerResponsePayload.CODEC);
+        NetworkCompat.playS2C().register(
+                ChestTrackerPayloads.IndexChangedPayload.TYPE,
+                ChestTrackerPayloads.IndexChangedPayload.CODEC);
         NetworkCompat.playS2C().register(
                 ChestTrackerPayloads.HelloPayload.TYPE,
                 ChestTrackerPayloads.HelloPayload.CODEC);
@@ -74,6 +109,24 @@ public final class ChestTrackerNetwork {
                     send(player, new ChestTrackerPayloads.ContainerResponsePayload(response));
                 });
 
+        ServerPlayNetworking.registerGlobalReceiver(
+                ChestTrackerPayloads.SubscribePayload.TYPE,
+                (payload, context) -> {
+                    ServerPlayer player = context.player();
+                    if (!payload.watching()) {
+                        WATCHERS.remove(player.getUUID());
+                        return;
+                    }
+                    // Seeded with the current generation: the client has just
+                    // queried, so it is up to date by definition and does not
+                    // need telling until something moves.
+                    TrackerService tracker = Trackers.current();
+                    if (tracker == null) return;
+                    String dimensionId = Trackers.dimensionId(player.level());
+                    WATCHERS.put(player.getUUID(),
+                            new Watcher(dimensionId, tracker.generation(dimensionId)));
+                });
+
         // Announce, rather than wait to be asked. A server without the mod
         // silently drops an unknown payload, so a client that asked first could
         // not tell "no mod here" from "still thinking" - it would have to guess
@@ -91,6 +144,61 @@ public final class ChestTrackerNetwork {
                     QueryDto.Hello.PROTOCOL_VERSION,
                     QueryService.mayQuery(player, access()))));
         });
+
+        ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> forget(handler.player));
+    }
+
+    /**
+     * Tells watching clients when their view has gone out of date.
+     *
+     * <p>Called every server tick, but acts on one tick in
+     * {@link #SIGNAL_INTERVAL_TICKS}. A player is only signalled when their own
+     * dimension's index has actually moved since they were last told, so a
+     * scan running in the nether does not wake everyone in the overworld.
+     */
+    public static void flushChanges(MinecraftServer server) {
+        if (WATCHERS.isEmpty()) return;
+        if (++sinceLastSignal < SIGNAL_INTERVAL_TICKS) return;
+        sinceLastSignal = 0;
+
+        TrackerService tracker = Trackers.current();
+        if (tracker == null) return;
+
+        for (Map.Entry<UUID, Watcher> entry : WATCHERS.entrySet()) {
+            ServerPlayer player = server.getPlayerList().getPlayer(entry.getKey());
+            if (player == null) {
+                // Gone without closing the screen; nothing else cleans this up.
+                WATCHERS.remove(entry.getKey());
+                continue;
+            }
+
+            String dimensionId = Trackers.dimensionId(player.level());
+            long generation = tracker.generation(dimensionId);
+            Watcher watcher = entry.getValue();
+            // A dimension change counts as "out of date" too: what they are
+            // looking at describes a world they have left.
+            if (watcher.generation() == generation && watcher.dimensionId().equals(dimensionId)) continue;
+
+            WATCHERS.put(entry.getKey(), new Watcher(dimensionId, generation));
+            send(player, ChestTrackerPayloads.IndexChangedPayload.INSTANCE);
+        }
+    }
+
+    /** Forgets a disconnecting player, so a closed connection cannot be signalled. */
+    public static void forget(ServerPlayer player) {
+        WATCHERS.remove(player.getUUID());
+    }
+
+    /**
+     * Forgets everyone, on shutdown.
+     *
+     * <p>A client leaving a singleplayer world and opening another keeps the
+     * same process, so without this the next world starts with the last one's
+     * watchers still listed.
+     */
+    public static void forgetAll() {
+        WATCHERS.clear();
+        sinceLastSignal = 0;
     }
 
     /**

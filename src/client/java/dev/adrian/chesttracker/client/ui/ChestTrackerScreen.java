@@ -76,6 +76,15 @@ public final class ChestTrackerScreen extends Screen {
     private static final int ROW_HOVER = 0x40000000;
     private static final int BUTTON_ON = 0xFF6A9A4A;
 
+    /**
+     * Floor between automatic refreshes.
+     *
+     * <p>The server already limits how often it reports a change, but a
+     * singleplayer world reads the counter directly and has no such limit -
+     * a hopper line would otherwise re-query every frame.
+     */
+    private static final long AUTO_REFRESH_MIN_MS = 400;
+
     private static final int MAX_ITEMS = 900;
     private static final int MAX_CONTAINERS = 64;
     private static final int DETAIL_ROW = 11;
@@ -124,6 +133,19 @@ public final class ChestTrackerScreen extends Screen {
      */
     private boolean containersPending;
 
+    /**
+     * The index generation this screen last drew, and when it last re-asked.
+     *
+     * <p>Comparing a token beats being called back: a change that arrives while
+     * no screen is open costs nothing, and a closed screen cannot leave a
+     * listener behind.
+     */
+    private long lastChangeToken;
+    private long lastAutoRefresh;
+
+    /** A change arrived while the detail pane was open, so the grid is behind. */
+    private boolean itemsStale;
+
     private Sort sort = Sort.COUNT;
     private boolean includeNested = true;
     private boolean includeMachines;
@@ -159,7 +181,16 @@ public final class ChestTrackerScreen extends Screen {
         setInitialFocus(search);
 
         availability = ClientTracker.availability();
+        lastChangeToken = ClientTracker.changeToken();
+        // Ask the server to push changes only while this is on screen.
+        ClientTracker.setWatching(true);
         refreshItems();
+    }
+
+    @Override
+    public void removed() {
+        ClientTracker.setWatching(false);
+        super.removed();
     }
 
     // --- data --------------------------------------------------------------
@@ -168,7 +199,18 @@ public final class ChestTrackerScreen extends Screen {
         return new QueryDto.Filters(includeNested, includeMachines, originIndex);
     }
 
+    /** A refresh the player asked for: back to the grid, scrolled to the top. */
     private void refreshItems() {
+        refreshItems(true);
+    }
+
+    /**
+     * @param resetView true when the player changed the search or the filters,
+     *                  false for a background refresh - which must leave the
+     *                  scroll position and the open pane alone, or the grid
+     *                  jumps under the cursor every time a hopper moves an item
+     */
+    private void refreshItems(boolean resetView) {
         if (!canQuery()) return;
         ClientTracker.summarise(pending, filters(), MAX_ITEMS).thenAccept(response ->
                 minecraft.execute(() -> {
@@ -176,9 +218,62 @@ public final class ChestTrackerScreen extends Screen {
                     if (response.requestId() <= newestItemsReply) return;
                     newestItemsReply = response.requestId();
                     items = sorted(response.items());
+                    itemsStale = false;
+                    if (!resetView) {
+                        // The list can shrink, so a kept scroll can end up past
+                        // the end of it.
+                        scrollRow = Math.min(scrollRow, maxScrollRow());
+                        return;
+                    }
                     scrollRow = 0;
                     back();
                 }));
+    }
+
+    /**
+     * Re-asks where the selected item is, without clearing what is on screen.
+     *
+     * <p>Used for background refreshes, so a live update does not blink the
+     * pane through "Looking..." on every change.
+     */
+    private void refreshContainers() {
+        String itemId = selectedItemId;
+        if (itemId == null || !canQuery()) return;
+        ClientTracker.containers(itemId, filters(), MAX_CONTAINERS).thenAccept(response ->
+                minecraft.execute(() -> {
+                    if (!itemId.equals(selectedItemId)) return;
+                    if (response.requestId() <= newestContainersReply) return;
+                    newestContainersReply = response.requestId();
+                    containers = response.hits();
+                    containersPending = false;
+                }));
+    }
+
+    /**
+     * Re-asks whichever view is open, when the index has moved under it.
+     *
+     * <p>Throttled, and only when the token actually changed - the token is not
+     * consumed while throttled, so a change during the quiet period is picked
+     * up as soon as it ends rather than lost.
+     */
+    private void pollForChanges() {
+        long token = ClientTracker.changeToken();
+        if (token == lastChangeToken) return;
+
+        long now = System.currentTimeMillis();
+        if (now - lastAutoRefresh < AUTO_REFRESH_MIN_MS) return;
+        lastChangeToken = token;
+        lastAutoRefresh = now;
+
+        if (selectedItemId == null) {
+            refreshItems(false);
+        } else {
+            // Refreshing the grid as well would double every update's cost for
+            // a pane the player cannot see. It is marked instead, and caught up
+            // when they go back to it.
+            refreshContainers();
+            itemsStale = true;
+        }
     }
 
     private boolean canQuery() {
@@ -200,14 +295,7 @@ public final class ChestTrackerScreen extends Screen {
         selectedItemId = itemId;
         containers = List.of();
         containersPending = true;
-        ClientTracker.containers(itemId, filters(), MAX_CONTAINERS).thenAccept(response ->
-                minecraft.execute(() -> {
-                    if (!itemId.equals(selectedItemId)) return;
-                    if (response.requestId() <= newestContainersReply) return;
-                    newestContainersReply = response.requestId();
-                    containers = response.hits();
-                    containersPending = false;
-                }));
+        refreshContainers();
     }
 
     private void back() {
@@ -260,7 +348,13 @@ public final class ChestTrackerScreen extends Screen {
         ClientTracker.Availability now = ClientTracker.availability();
         if (now != availability) {
             availability = now;
+            // A server that has just announced itself may not have been asked
+            // to push yet.
+            ClientTracker.setWatching(true);
+            lastChangeToken = ClientTracker.changeToken();
             refreshItems();
+        } else {
+            pollForChanges();
         }
 
         if (!canQuery()) {
@@ -578,6 +672,9 @@ public final class ChestTrackerScreen extends Screen {
 
         if (event.button() == 1 && selectedItemId != null) {
             back();
+            // Changes that arrived while the pane was open were only applied to
+            // the pane; the grid behind it is caught up here.
+            if (itemsStale) refreshItems(false);
             return true;
         }
 

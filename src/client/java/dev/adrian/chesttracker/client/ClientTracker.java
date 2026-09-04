@@ -65,6 +65,38 @@ public final class ClientTracker {
         return client.hasSingleplayerServer() && client.getSingleplayerServer() != null;
     }
 
+    // --- Live updates -------------------------------------------------------
+
+    /**
+     * A value that changes whenever what the screen is showing may be out of
+     * date.
+     *
+     * <p>One token for both routes, so the screen has no idea whether a network
+     * was involved. On a server it counts pushes; in our own world it reads the
+     * index's own change counter directly, which needs no networking and no
+     * subscription at all.
+     */
+    public static long changeToken() {
+        if (!hasLocalIndex()) return ServerLink.changeToken();
+
+        TrackerService tracker = Trackers.current();
+        LocalPlayer player = Minecraft.getInstance().player;
+        if (tracker == null || player == null) return 0L;
+        // A plain volatile read; safe from the render thread, unlike the index.
+        return tracker.generation(player.level().dimension().identifier().toString());
+    }
+
+    /**
+     * Says whether the screen is open, so a server only pushes to watchers.
+     *
+     * <p>Does nothing in our own world - there is nothing to subscribe to when
+     * the index is right here.
+     */
+    public static void setWatching(boolean watching) {
+        if (hasLocalIndex()) return;
+        ServerLink.setWatching(watching);
+    }
+
     // --- Queries ------------------------------------------------------------
 
     /** Totals every indexed item, for the item-first grid. */

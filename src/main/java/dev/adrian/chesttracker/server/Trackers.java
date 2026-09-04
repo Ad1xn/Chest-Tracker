@@ -173,6 +173,40 @@ public final class Trackers {
         return done;
     }
 
+    /**
+     * Re-reads only those of {@code positions} that have actually changed since
+     * they were last read.
+     *
+     * <p>Used before showing results. Re-reading every container about to be
+     * displayed would be mostly wasted work: {@link #onContainerChanged} marks
+     * anything that changes and {@link #drainDirty} re-reads it every tick, so
+     * a loaded container is normally already current. The dirty set is exactly
+     * the ones that are not, and it is usually empty.
+     *
+     * <p>Positions handled here are taken off the dirty set, so the next drain
+     * does not read them a second time.
+     *
+     * @return how many were actually re-read
+     */
+    public static int refreshDirty(ServerLevel level, String dimensionId, java.util.Collection<Long> positions) {
+        TrackerService tracker = current;
+        if (tracker == null || level == null) return 0;
+
+        java.util.Set<Long> dirty = DIRTY.get(dimensionId);
+        if (dirty == null || dirty.isEmpty()) return 0;
+
+        var scanner = new dev.adrian.chesttracker.server.scan.LiveScanner(tracker);
+        int refreshed = 0;
+        for (Long pos : positions) {
+            // remove() reports whether it was there, so this both tests and
+            // claims the position in one step.
+            if (!dirty.remove(pos)) continue;
+            scanner.refreshIfLoaded(level, dimensionId, pos);
+            refreshed++;
+        }
+        return refreshed;
+    }
+
     /** Indexes one currently-loaded chunk, for chunks the region scan cannot use. */
     public static void liveScanChunk(String dimensionId, long chunkKey) {
         TrackerService tracker = current;

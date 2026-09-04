@@ -8,7 +8,6 @@ import dev.adrian.chesttracker.core.model.Origin;
 import dev.adrian.chesttracker.core.model.StackEntry;
 import dev.adrian.chesttracker.core.net.QueryDto;
 import dev.adrian.chesttracker.core.util.BlockKey;
-import dev.adrian.chesttracker.server.scan.LiveScanner;
 import net.minecraft.commands.Commands;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
@@ -140,9 +139,14 @@ public final class QueryService {
         applyFilters(builder, request.filters(), tracker);
         IndexQuery query = builder.build();
 
-        refreshLoaded(tracker, player.level(), dimensionId, query);
-
         List<SearchResult> results = tracker.search(dimensionId, query);
+        // Only re-search when a refresh actually changed something. A refresh
+        // can drop a container that is no longer there, so the first result
+        // list cannot simply be reused - but usually nothing was stale and the
+        // second search is skipped entirely.
+        if (refreshStale(player.level(), dimensionId, results) > 0) {
+            results = tracker.search(dimensionId, query);
+        }
         List<QueryDto.ContainerHit> hits = new java.util.ArrayList<>(results.size());
         for (SearchResult result : results) {
             String typeId = tracker.palette().value(result.container().typeId());
@@ -162,20 +166,20 @@ public final class QueryService {
     // --- Helpers ------------------------------------------------------------
 
     /**
-     * Re-reads any candidate whose chunk is loaded, before its contents are
-     * reported.
+     * Brings any about-to-be-shown container up to date, if it is not already.
      *
-     * <p>Contents in an unloaded chunk cannot have changed since they were
-     * indexed; contents in a loaded one can, and a stale result is the failure
-     * that costs the mod its credibility.
+     * <p>A stale result is the failure that costs the mod its credibility, but
+     * that does not mean re-reading everything: live tracking already refreshes
+     * changed containers every tick, so all but the ones still queued are
+     * current. Only those are re-read here, and there are usually none.
+     *
+     * @return how many were actually re-read
      */
-    private static void refreshLoaded(TrackerService tracker, ServerLevel level,
-                                      String dimensionId, IndexQuery query) {
-        if (level == null) return;
-        LiveScanner refresher = new LiveScanner(tracker);
-        for (SearchResult candidate : tracker.search(dimensionId, query)) {
-            refresher.refreshIfLoaded(level, dimensionId, candidate.container().pos());
-        }
+    private static int refreshStale(ServerLevel level, String dimensionId, List<SearchResult> results) {
+        if (results.isEmpty()) return 0;
+        List<Long> positions = new java.util.ArrayList<>(results.size());
+        for (SearchResult result : results) positions.add(result.container().pos());
+        return Trackers.refreshDirty(level, dimensionId, positions);
     }
 
     private static boolean hasNestedMatch(SearchResult result) {

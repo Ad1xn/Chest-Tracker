@@ -58,6 +58,30 @@ public record ContainerRecord(
         return new ContainerRecord(pos, dimensionId, typeId, origin, null, false, false, null, tick, List.of());
     }
 
+    /**
+     * Whether this record says the same thing as {@code other}, ignoring when
+     * it was last seen.
+     *
+     * <p>Used to tell a real change from a re-read. Containers are re-read
+     * constantly - every query refreshes whatever is loaded - and each re-read
+     * writes a fresh {@code lastSeenTick}, so plain equality would call every
+     * one of them a change. Anything driven off "did this change" would then
+     * fire continuously, and a change signal that is always on carries no
+     * information.
+     */
+    public boolean sameDataAs(ContainerRecord other) {
+        return other != null
+                && pos == other.pos
+                && dimensionId == other.dimensionId
+                && typeId == other.typeId
+                && origin == other.origin
+                && unlooted == other.unlooted
+                && contentsKnown == other.contentsKnown
+                && Objects.equals(owner, other.owner)
+                && Objects.equals(customName, other.customName)
+                && contents.equals(other.contents);
+    }
+
     public long chunkKey() {
         return BlockKey.chunkOf(pos);
     }

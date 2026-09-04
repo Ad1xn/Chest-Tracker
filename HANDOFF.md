@@ -16,7 +16,7 @@ containers after you physically open them.
 - Local: `/Users/adrian/chesttracker`
 - Targets: **MC 1.21.11 and 26.2**, Fabric, both first-class
 - Released: `v0.1.0`, with a GitHub Actions release workflow on `v*` tags
-- 105 unit tests, green on both targets
+- 123 unit tests, green on both targets
 
 ### The constraint that shapes everything
 
@@ -195,6 +195,39 @@ platform/NetworkCompat     the one version shim: PayloadTypeRegistry accessors
 client/net/ServerLink      connection state, correlation, timeouts, fallback
 ```
 
+### Live updates
+
+The screen refreshes itself while open, in every environment.
+
+`TrackerService` keeps a **per-dimension change counter**, bumped from the three methods every
+mutation funnels through (`record` / `remove` / `reconcileChunk`). The screen compares that counter
+rather than being called back — a change while no screen is open costs nothing, and a closed screen
+cannot leave a listener behind.
+
+- **Singleplayer** reads the counter directly. No networking, no subscription.
+- **On a server** the client sends `Subscribe(true)` on open and `false` on close; the server
+  compares each watcher's last-told generation against their *current dimension's* and pushes a
+  bodiless `IndexChanged` at most every 10 ticks.
+
+**The signal carries no data, on purpose.** Sending the changed rows would be a second description
+of the index that can drift from the real one, and would have to re-implement the filters and the
+permission tier to know what that player may see. The client re-asks through the query path it
+already uses, which cannot disagree with itself.
+
+**The trap, and why `ContainerRecord.sameDataAs` exists:** a query re-reads loaded containers, and
+every re-read stamps a fresh `lastSeenTick`. Counting that as a change makes the counter climb
+forever, so a watching client re-queries, which re-reads, which bumps the counter — a loop that
+feeds itself. `record` therefore compares everything *except* `lastSeenTick` and only bumps on a
+real difference. `TrackerServiceTest` and `ContainerRecordTest` pin this down; do not "simplify"
+either into plain equality.
+
+**Refreshing before display is now targeted.** It used to re-read every container about to be shown.
+Live tracking already refreshes changed containers every tick, so all but the ones still queued are
+current: `Trackers.refreshDirty` re-reads only positions still on the dirty set (usually none), and
+`QueryService` re-runs its search only when that actually changed something. Note it never loads a
+chunk — `refreshIfLoaded` checks `hasChunk` first, so unloaded containers are served from the saved
+index.
+
 **Decisions that are load-bearing:**
 
 - **Registry strings on the wire, never palette ids.** The two sides' palettes are built
@@ -222,10 +255,15 @@ client/net/ServerLink      connection state, correlation, timeouts, fallback
 - **Both sends are guarded by `canSend`.** Sending a peer a payload it never registered disconnects
   it — for the hello, our own greeting would have been what kicked the player.
 
-**Verified:** both targets build; 105 unit tests green on both (up from 88), including a codec
-round-trip per payload through a real `FriendlyByteBuf` and the owner-filter cases. Both dedicated
-servers start clean with registration and handlers installed, run a region scan and answer
-`/chesttracker stats` with no errors.
+**Verified:** both targets build; 123 unit tests green on both (up from 88), including a codec
+round-trip per payload through a real `FriendlyByteBuf`, the owner-filter cases, and the change
+counter's behaviour on re-reads. Both dedicated servers start clean with registration and handlers
+installed, run a region scan and answer `/chesttracker stats` with no errors.
+
+**Known cost:** while a full region scan is running, the index changes continuously, so an open
+screen re-queries on its floor (400 ms). A summary query walks the whole dimension index, so on a
+very large world that is real work on the server thread for as long as the screen stays open during
+a scan. Not measured on a large world yet.
 
 **Not verified:** the actual client-to-server round trip in game. That needs a real client joining a
 real server, which cannot be driven headlessly here. Worth doing before release: join a dedicated

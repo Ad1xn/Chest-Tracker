@@ -187,6 +187,59 @@ public final class ChestTrackerPayloads {
         }
     }
 
+    // --- Live updates -------------------------------------------------------
+
+    /**
+     * Client tells the server whether it is currently watching.
+     *
+     * <p>Only sent when the search screen opens and closes. Without it the
+     * server would either push to everyone - most of whom have no screen open -
+     * or push to nobody.
+     *
+     * <p>These two shapes are defined here rather than in {@code core}'s
+     * {@code QueryDto}: they carry no domain data, only connection bookkeeping,
+     * and a future Paper plugin sharing {@code core} would have its own.
+     */
+    public record SubscribePayload(boolean watching) implements CustomPacketPayload {
+
+        public static final Type<SubscribePayload> TYPE = new Type<>(id("subscribe"));
+
+        public static final StreamCodec<FriendlyByteBuf, SubscribePayload> CODEC =
+                StreamCodec.of(
+                        (buf, payload) -> buf.writeBoolean(payload.watching()),
+                        buf -> new SubscribePayload(buf.readBoolean()));
+
+        @Override
+        public Type<? extends CustomPacketPayload> type() {
+            return TYPE;
+        }
+    }
+
+    /**
+     * Server tells a watching client that its view is out of date.
+     *
+     * <p>Carries no data on purpose. Sending the changed rows themselves would
+     * be a second description of the index that can drift from the real one,
+     * and would have to re-implement the filters and the permission tier to
+     * know what this player is allowed to see. Instead the client re-asks
+     * through the query path it already uses, which cannot disagree with
+     * itself.
+     */
+    public record IndexChangedPayload() implements CustomPacketPayload {
+
+        public static final Type<IndexChangedPayload> TYPE = new Type<>(id("index_changed"));
+
+        public static final IndexChangedPayload INSTANCE = new IndexChangedPayload();
+
+        public static final StreamCodec<FriendlyByteBuf, IndexChangedPayload> CODEC =
+                StreamCodec.of((buf, payload) -> {}, buf -> INSTANCE);
+
+        @Override
+        public Type<? extends CustomPacketPayload> type() {
+            return TYPE;
+        }
+    }
+
     // --- Hello --------------------------------------------------------------
 
     /** Server announces that it has an index, and whether this player may read it. */

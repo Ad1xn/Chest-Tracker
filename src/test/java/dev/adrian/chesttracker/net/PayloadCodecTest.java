@@ -112,6 +112,30 @@ class PayloadCodecTest {
     }
 
     @Test
+    void subscribeSurvivesTheRoundTripBothWays() {
+        for (boolean watching : new boolean[]{true, false}) {
+            FriendlyByteBuf buf = buffer();
+            ChestTrackerPayloads.SubscribePayload.CODEC.encode(
+                    buf, new ChestTrackerPayloads.SubscribePayload(watching));
+
+            assertEquals(watching,
+                    ChestTrackerPayloads.SubscribePayload.CODEC.decode(buf).watching());
+            assertEquals(0, buf.readableBytes());
+        }
+    }
+
+    @Test
+    void theChangeSignalCarriesNoBytes() {
+        // It is sent per watcher on a timer, so an empty body is the point.
+        FriendlyByteBuf buf = buffer();
+        ChestTrackerPayloads.IndexChangedPayload.CODEC.encode(
+                buf, ChestTrackerPayloads.IndexChangedPayload.INSTANCE);
+
+        assertEquals(0, buf.readableBytes());
+        assertNotNull(ChestTrackerPayloads.IndexChangedPayload.CODEC.decode(buf));
+    }
+
+    @Test
     void anImplausibleEntryCountIsRefusedRatherThanAllocatedFor() {
         // A hostile or corrupt packet can declare any length it likes. The read
         // must refuse before it reserves room for it, or one small packet asks
