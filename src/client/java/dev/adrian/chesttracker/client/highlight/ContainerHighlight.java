@@ -56,8 +56,15 @@ public final class ContainerHighlight {
     /** Counts down while the view is being turned towards the nearest match. */
     private int turnTicksLeft;
 
-    /** Beyond this there is nothing on screen to draw a box around anyway. */
-    private static final double DRAW_RADIUS = 160.0;
+    /**
+     * Beyond this a marker is not worth drawing.
+     *
+     * <p>Well past render distance on purpose: the containers hardest to find
+     * are the ones in chunks that were never loaded, and those are exactly the
+     * ones with no terrain drawn to hide them. Cheap, because the number of
+     * markers is capped anyway.
+     */
+    private static final double DRAW_RADIUS = 512.0;
 
     /** Enough to show a base's worth without filling the screen with wire. */
     private static final int MAX_BOXES = 96;
@@ -113,26 +120,33 @@ public final class ContainerHighlight {
      * Growing it with distance keeps roughly the apparent size instead of
      * shrinking to nothing, so scanning a base for the box actually works.
      */
-    private static final double GROW_PER_BLOCK = 0.03;
+    private static final double GROW_PER_BLOCK = 0.008;
+
+    /**
+     * Distance at which a box starts growing at all.
+     *
+     * <p>Nothing nearer gets any bigger than the block it sits on. Growing
+     * from zero distance made close boxes fat enough to lose the chest inside
+     * them, which is the opposite of pointing at it - and up close the box is
+     * perfectly legible at its true size.
+     */
+    private static final double GROW_FROM = 24.0;
 
     /** Past this the box would swallow the building it is in. */
-    private static final double MAX_GROW = 3.0;
+    private static final double MAX_GROW = 1.0;
 
-    /** Below this the container is in plain sight and a line only clutters it. */
-    private static final double GUIDE_MIN_DISTANCE = 12.0;
+    /** Below this the container is in plain sight and a beam only clutters it. */
+    private static final double BEAM_MIN_DISTANCE = 8.0;
 
-    /** Where the line starts, so it is not drawn inside the camera. */
-    private static final double GUIDE_START = 3.0;
-
-    /** Dropped below eye level, so it does not sit under the crosshair. */
-    private static final double GUIDE_DROP = 0.6;
+    /** How far a beam rises above its container. */
+    private static final double BEAM_HEIGHT = 48.0;
 
     /** Ticks spent turning to face a match, about a third of a second. */
     private static final int TURN_TICKS = 7;
 
-    private static final float BASE_LINE_WIDTH = 2.5f;
-    private static final float LINE_WIDTH_PER_BLOCK = 0.06f;
-    private static final float MAX_LINE_WIDTH = 8.0f;
+    private static final float BASE_LINE_WIDTH = 2.0f;
+    private static final float LINE_WIDTH_PER_BLOCK = 0.02f;
+    private static final float MAX_LINE_WIDTH = 5.0f;
 
     /** Whether there is anything for the world renderer to draw. */
     public boolean hasBoxes() {
@@ -151,8 +165,6 @@ public final class ContainerHighlight {
      * @param eye the camera position; boxes are drawn relative to it
      */
     public void drawBoxes(PoseStack.Pose pose, VertexConsumer lines, Vec3 eye) {
-        drawGuideLine(pose, lines, eye);
-
         int drawn = 0;
         for (Long position : positions) {
             if (drawn >= MAX_BOXES) break;
@@ -171,9 +183,10 @@ public final class ContainerHighlight {
             // across a base is something you can find by looking rather than
             // something you have to already be pointing at.
             double distance = Math.sqrt(distSq);
-            double grow = Math.min(MAX_GROW, distance * GROW_PER_BLOCK);
+            double beyond = Math.max(0.0, distance - GROW_FROM);
+            double grow = Math.min(MAX_GROW, beyond * GROW_PER_BLOCK);
             float width = (float) Math.min(MAX_LINE_WIDTH,
-                    BASE_LINE_WIDTH + distance * LINE_WIDTH_PER_BLOCK);
+                    BASE_LINE_WIDTH + beyond * LINE_WIDTH_PER_BLOCK);
 
             // The nearest one is picked out, because that is the one the action
             // bar is talking about and the one the player is walking towards.
@@ -183,6 +196,17 @@ public final class ContainerHighlight {
                     nearest ? 0.82f : 0.85f,
                     nearest ? 0.2f : 1.0f,
                     0.9f, grow, width);
+
+            // The column is what carries at range, and the only part of this
+            // that means anything where no terrain is drawn to place it.
+            if (ChestTrackerConfig.get().guideBeam && distance > BEAM_MIN_DISTANCE) {
+                HighlightBox.beam(pose, lines,
+                        x - eye.x + 0.5, y - eye.y + 1.0, z - eye.z + 0.5, BEAM_HEIGHT,
+                        nearest ? 1.0f : 0.25f,
+                        nearest ? 0.82f : 0.85f,
+                        nearest ? 0.2f : 1.0f,
+                        0.75f, width);
+            }
             drawn++;
         }
     }
@@ -213,31 +237,6 @@ public final class ContainerHighlight {
         player.setYRot(player.getYRot() + yawGap * step);
         player.setXRot(player.getXRot() + pitchGap * step);
         turnTicksLeft--;
-    }
-
-    /**
-     * A line pointing at the nearest match, once it is far enough to want one.
-     *
-     * <p>Straight rather than walked: a real path would have to solve the same
-     * problem the player is about to solve by looking, and what is missing when
-     * the box is a speck on the horizon is "that way, and that far". It starts
-     * a few blocks out so it does not smear across the camera.
-     */
-    private void drawGuideLine(PoseStack.Pose pose, VertexConsumer lines, Vec3 eye) {
-        if (positions.isEmpty() || !ChestTrackerConfig.get().guideLine) return;
-
-        double tx = BlockKey.x(pos) + 0.5 - eye.x;
-        double ty = BlockKey.y(pos) + 0.5 - eye.y;
-        double tz = BlockKey.z(pos) + 0.5 - eye.z;
-
-        double length = Math.sqrt(tx * tx + ty * ty + tz * tz);
-        if (length < GUIDE_MIN_DISTANCE || length > DRAW_RADIUS) return;
-
-        double scale = GUIDE_START / length;
-        HighlightBox.line(pose, lines,
-                tx * scale, ty * scale - GUIDE_DROP, tz * scale,
-                tx, ty, tz,
-                1.0f, 0.82f, 0.2f, 0.65f, 3.0f);
     }
 
     /**

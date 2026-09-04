@@ -230,8 +230,17 @@ public final class ChestTrackerConfig {
      */
     public boolean turnToTarget = true;
 
-    /** Draw a line towards the nearest match once it is far enough to need one. */
-    public boolean guideLine = true;
+    /**
+     * Stand a column of light on each match.
+     *
+     * <p>Replaces a line drawn from the camera to the nearest container, which
+     * was a mistake. Anchored at the eye, the only part of it a player could
+     * actually see was the far end, which read as something hanging off the
+     * chest rather than as a direction to walk. A column stands where the
+     * container is, needs nothing around it to make sense, and so still says
+     * something in a chunk that was never loaded.
+     */
+    public boolean guideBeam = true;
 
     /** Seconds a highlight lasts while the player keeps making progress towards it. */
     public int highlightSeconds = 45;

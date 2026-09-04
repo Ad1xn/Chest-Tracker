@@ -68,6 +68,36 @@ public final class HighlightBox {
     }
 
     /**
+     * A column of light standing on the container, fading out with height.
+     *
+     * <p>The box alone is no use where it is most needed. Past render distance
+     * there is no terrain drawn to place it against, and a wireframe cube
+     * floating in an empty sky says nothing about where it is - the chunk it
+     * sits in has never been loaded, so there is nothing around it to read. A
+     * column is visible over whatever is in the way and reads as a position on
+     * the ground rather than a shape in the air.
+     *
+     * <p>Drawn as segments rather than one line so the fade is visible: alpha
+     * is a vertex attribute, and a two-vertex line can only fade linearly from
+     * end to end, which at this length is barely a gradient at all.
+     */
+    public static void beam(PoseStack.Pose pose, VertexConsumer lines,
+                            double x, double y, double z, double height,
+                            float red, float green, float blue, float alpha, float lineWidth) {
+        final int segments = 8;
+        double step = height / segments;
+        for (int i = 0; i < segments; i++) {
+            float from = alpha * (1.0f - (float) i / segments);
+            float to = alpha * (1.0f - (float) (i + 1) / segments);
+            // Each segment is flat-shaded at its own alpha; eight of them is
+            // enough that the join is not visible at any distance this is read.
+            float mid = (from + to) / 2.0f;
+            line(pose, lines, x, y + i * step, z, x, y + (i + 1) * step, z,
+                    red, green, blue, mid, lineWidth);
+        }
+    }
+
+    /**
      * One free-standing segment, for the line drawn towards a distant match.
      *
      * <p>Takes its normal from its own direction, like the box edges do.
