@@ -5,6 +5,7 @@ import dev.adrian.chesttracker.server.TrackerService;
 import dev.adrian.chesttracker.server.Trackers;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
+import dev.adrian.chesttracker.config.ChestTrackerConfig;
 import dev.adrian.chesttracker.server.scan.LiveScanner;
 import dev.adrian.chesttracker.server.scan.RegionScanner;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerChunkEvents;
@@ -36,6 +37,16 @@ public final class ChestTracker implements ModInitializer {
             tracker.load();
             Trackers.setCurrent(tracker, server);
             LOG.info("ChestTracker ready: {} containers restored", tracker.totalContainers());
+
+            if (ChestTrackerConfig.get().scanOnWorldJoin) {
+                // Background, never at join: a full region scan of a large world
+                // would freeze the game for as long as it takes. This yields
+                // under load and simply finishes when it finishes.
+                RegionScanner scanner = Trackers.regionScanner();
+                if (scanner != null) {
+                    scanner.start(server.getWorldPath(LevelResource.ROOT), server.overworld().getGameTime());
+                }
+            }
         });
 
         ServerLifecycleEvents.SERVER_STOPPING.register(server -> {

@@ -223,6 +223,51 @@ class WorldIndexTest {
     }
 
     @Test
+    void summarisesItemsAcrossContainers() {
+        index.put(chest(0, 64, 0, new StackEntry(DIAMOND, 30), new StackEntry(STONE, 64)));
+        index.put(chest(10, 64, 0, new StackEntry(DIAMOND, 12)));
+        index.put(chest(1000, 64, 0, new StackEntry(EMERALD, 1)));
+
+        List<WorldIndex.ItemSummary> summary = index.summarise(
+                IndexQuery.builder().center(BlockKey.pack(0, 64, 0)).build());
+
+        WorldIndex.ItemSummary diamonds = summary.stream()
+                .filter(entry -> entry.itemId() == DIAMOND).findFirst().orElseThrow();
+        assertEquals(42, diamonds.totalCount(), "a total must span every container");
+        assertEquals(2, diamonds.containerCount());
+        assertEquals(0.0, diamonds.nearestDistSq(), 1e-9);
+    }
+
+    @Test
+    void summaryCountsAContainerOnceEvenWithSeveralStacks() {
+        index.put(chest(0, 64, 0, new StackEntry(DIAMOND, 64), new StackEntry(DIAMOND, 32)));
+
+        WorldIndex.ItemSummary diamonds = index.summarise(IndexQuery.builder().build()).get(0);
+        assertEquals(96, diamonds.totalCount());
+        assertEquals(1, diamonds.containerCount(), "two stacks in one chest is still one container");
+    }
+
+    @Test
+    void summaryExcludesContainersWhoseContentsAreUnknown() {
+        index.put(chest(0, 64, 0, new StackEntry(DIAMOND, 5)));
+        index.put(ContainerRecord.locationOnly(BlockKey.pack(20, 64, 0), 0, CHEST, Origin.NATURAL, 0L));
+
+        List<WorldIndex.ItemSummary> summary = index.summarise(IndexQuery.builder().build());
+        assertEquals(1, summary.size());
+        assertEquals(5, summary.get(0).totalCount());
+    }
+
+    @Test
+    void summaryLeadsWithTheMostPlentifulItem() {
+        index.put(chest(0, 64, 0, new StackEntry(STONE, 10)));
+        index.put(chest(5, 64, 0, new StackEntry(DIAMOND, 100)));
+
+        List<WorldIndex.ItemSummary> summary = index.summarise(
+                IndexQuery.builder().center(BlockKey.pack(0, 64, 0)).build());
+        assertEquals(DIAMOND, summary.get(0).itemId());
+    }
+
+    @Test
     void reportsStats() {
         index.put(chest(0, 64, 0, new StackEntry(DIAMOND, 1)));
         index.put(ContainerRecord.locationOnly(BlockKey.pack(10, 64, 0), 0, CHEST, Origin.NATURAL, 0L));

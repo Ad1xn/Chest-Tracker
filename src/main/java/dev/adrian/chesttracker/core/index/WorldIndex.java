@@ -248,6 +248,62 @@ public final class WorldIndex {
         return matches;
     }
 
+    /**
+     * One item, totalled across every container that matched.
+     *
+     * @param itemId         palette id of the item
+     * @param totalCount     how many exist in total
+     * @param containerCount how many containers hold at least one
+     * @param nearestDistSq  squared distance to the closest of those containers
+     */
+    public record ItemSummary(int itemId, int totalCount, int containerCount, double nearestDistSq)
+            implements Comparable<ItemSummary> {
+        @Override
+        public int compareTo(ItemSummary other) {
+            // Most plentiful first, ties broken by proximity, so both "what do I
+            // have a lot of" and "where is the nearest one" read naturally.
+            int byCount = Integer.compare(other.totalCount, totalCount);
+            return byCount != 0 ? byCount : Double.compare(nearestDistSq, other.nearestDistSq);
+        }
+    }
+
+    /**
+     * Totals matching containers' contents per item.
+     *
+     * <p>This backs the item-first view. Someone asking "where is my redstone"
+     * wants one row saying they have 2,304 across four containers - not four
+     * container rows to add up by hand.
+     */
+    public List<ItemSummary> summarise(IndexQuery query) {
+        Map<Integer, int[]> totals = new HashMap<>();       // itemId -> {count, containers}
+        Map<Integer, Double> nearest = new HashMap<>();
+
+        for (SearchResult result : query(query)) {
+            ContainerRecord container = result.container();
+            // A container whose contents we cannot know must not inflate a total.
+            if (!container.contentsKnown()) continue;
+
+            Set<Integer> seenHere = new HashSet<>();
+            for (StackEntry entry : container.contents()) {
+                if (!query.includeNested() && entry.isNested()) continue;
+                if (!query.itemIds().isEmpty() && !query.itemIds().contains(entry.itemId())) continue;
+
+                int[] totalsFor = totals.computeIfAbsent(entry.itemId(), id -> new int[2]);
+                totalsFor[0] += entry.count();
+                // Several stacks of one item in one chest is still one container.
+                if (seenHere.add(entry.itemId())) totalsFor[1]++;
+
+                nearest.merge(entry.itemId(), result.distanceSq(), Math::min);
+            }
+        }
+
+        List<ItemSummary> summaries = new ArrayList<>(totals.size());
+        totals.forEach((itemId, counts) -> summaries.add(new ItemSummary(
+                itemId, counts[0], counts[1], nearest.getOrDefault(itemId, Double.MAX_VALUE))));
+        Collections.sort(summaries);
+        return summaries;
+    }
+
     /** Diagnostic counts for {@code /chesttracker stats}. */
     public Stats stats() {
         int known = 0;
