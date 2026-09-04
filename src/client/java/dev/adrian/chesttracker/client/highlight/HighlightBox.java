@@ -81,19 +81,22 @@ public final class HighlightBox {
      * is a vertex attribute, and a two-vertex line can only fade linearly from
      * end to end, which at this length is barely a gradient at all.
      */
+    /** Space between marks. */
+    private static final double BEAM_SPACING = 2.5;
+
+    /** How tall each mark is - short enough to read as a dot, not a dash. */
+    private static final double BEAM_MARK = 0.45;
+
     public static void beam(PoseStack.Pose pose, VertexConsumer lines,
                             double x, double y, double z, double height,
                             float red, float green, float blue, float alpha, float lineWidth) {
-        final int segments = 8;
-        double step = height / segments;
-        for (int i = 0; i < segments; i++) {
-            float from = alpha * (1.0f - (float) i / segments);
-            float to = alpha * (1.0f - (float) (i + 1) / segments);
-            // Each segment is flat-shaded at its own alpha; eight of them is
-            // enough that the join is not visible at any distance this is read.
-            float mid = (from + to) / 2.0f;
-            line(pose, lines, x, y + i * step, z, x, y + (i + 1) * step, z,
-                    red, green, blue, mid, lineWidth);
+        for (double at = 0; at < height; at += BEAM_SPACING) {
+            // Fades out with height, so the column reads as rising from the
+            // container rather than falling on it.
+            float fade = alpha * (float) (1.0 - at / height);
+            if (fade <= 0.02f) break;
+            line(pose, lines, x, y + at, z, x, y + at + BEAM_MARK, z,
+                    red, green, blue, fade, lineWidth);
         }
     }
 

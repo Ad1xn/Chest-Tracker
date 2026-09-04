@@ -138,8 +138,8 @@ public final class ContainerHighlight {
     /** Below this the container is in plain sight and a beam only clutters it. */
     private static final double BEAM_MIN_DISTANCE = 8.0;
 
-    /** How far a beam rises above its container. */
-    private static final double BEAM_HEIGHT = 48.0;
+    /** How far the trail of marks rises above its container. */
+    private static final double BEAM_HEIGHT = 32.0;
 
     /** Ticks spent turning to face a match, about a third of a second. */
     private static final int TURN_TICKS = 7;

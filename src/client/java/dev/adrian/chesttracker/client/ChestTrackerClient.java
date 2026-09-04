@@ -10,10 +10,24 @@ import dev.adrian.chesttracker.client.ui.ChestTrackerScreen;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.minecraft.client.KeyMapping;
+import net.minecraft.resources.Identifier;
 import org.lwjgl.glfw.GLFW;
 
 /** Client entrypoint: keybind, search screen, and the guidance highlight. */
 public final class ChestTrackerClient implements ClientModInitializer {
+
+    /**
+     * The mod's own group in the controls screen.
+     *
+     * <p>Every other mod with more than one binding has one, and two loose
+     * entries filed under vanilla's Inventory heading are hard to find among
+     * the thirty already there.
+     *
+     * <p>The translation key is derived from the id, so this reads
+     * {@code key.category.chest-tracker.title} in the language file.
+     */
+    private static final KeyMapping.Category CATEGORY =
+            new KeyMapping.Category(Identifier.fromNamespaceAndPath(ChestTracker.MOD_ID, "title"));
 
     private static KeyMapping openSearch;
     private static KeyMapping searchHovered;
@@ -36,9 +50,7 @@ public final class ChestTrackerClient implements ClientModInitializer {
                 "key.chest-tracker.search",
                 InputConstants.Type.KEYSYM,
                 GLFW.GLFW_KEY_GRAVE_ACCENT,
-                // Categories became a record of an Identifier; INVENTORY is where
-                // a storage-search bind belongs in the controls screen.
-                KeyMapping.Category.INVENTORY));
+                CATEGORY));
 
         // Z is free in vanilla and sits under the left hand while the right one
         // is on the mouse, which is the posture this is used in: cursor over a
@@ -47,7 +59,7 @@ public final class ChestTrackerClient implements ClientModInitializer {
                 "key.chest-tracker.search_hovered",
                 InputConstants.Type.KEYSYM,
                 GLFW.GLFW_KEY_Z,
-                KeyMapping.Category.INVENTORY));
+                CATEGORY));
 
         // Keybinds do not fire while a screen is open, so the in-container half
         // of this listens on the screen itself - and, because that turned out

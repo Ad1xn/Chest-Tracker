@@ -1,5 +1,5 @@
 {
+  "key.category.chest-tracker.title": "ChestTracker",
   "key.chest-tracker.search": "Search containers",
-  "key.chest-tracker.search_hovered": "Find hovered item",
-  "category.chest-tracker": "ChestTracker"
+  "key.chest-tracker.search_hovered": "Find hovered item"
 }

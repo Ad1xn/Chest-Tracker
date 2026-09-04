@@ -33,7 +33,20 @@ import net.minecraft.client.gui.GuiGraphics;
 public final class ConfigScreen extends Screen {
 
     private static final int ROW_HEIGHT = 24;
-    private static final int WIDGET_WIDTH = 220;
+    private static final int WIDGET_WIDTH = 200;
+
+    /** Gap between the two columns. */
+    private static final int COLUMN_GAP = 8;
+
+    /**
+     * Rows before the list moves to the second column.
+     *
+     * <p>One column ran out of screen. At a common GUI scale the window is
+     * about 240 rows tall, and eleven settings plus a Done button did not fit -
+     * the bottom of the list simply left the screen, which is a worse way to
+     * hide a setting than not having it.
+     */
+    private static final int ROWS_PER_COLUMN = 6;
 
     private static final int MAX_RESULTS_CEILING = 2000;
     private static final int RESULTS_STEP = 50;
@@ -49,27 +62,48 @@ public final class ConfigScreen extends Screen {
         this.parent = parent;
     }
 
+    /** Widgets placed so far, which decides where the next one goes. */
+    private int placed;
+
+    private int columnX() {
+        int left = width / 2 - WIDGET_WIDTH - COLUMN_GAP / 2;
+        return placed < ROWS_PER_COLUMN ? left : left + WIDGET_WIDTH + COLUMN_GAP;
+    }
+
+    private int rowY() {
+        return 40 + (placed % ROWS_PER_COLUMN) * ROW_HEIGHT;
+    }
+
+    /** Places the next widget, wrapping into the second column when the first fills. */
+    private <T extends net.minecraft.client.gui.components.AbstractWidget> T place(T widget) {
+        addRenderableWidget(widget);
+        placed++;
+        return widget;
+    }
+
     @Override
     protected void init() {
-        int x = width / 2 - WIDGET_WIDTH / 2;
-        int y = 40;
+        placed = 0;
+        int x = columnX();
+        int y = rowY();
 
-        addRenderableWidget(toggle(x, y, "Scan world on join",
+        place(toggle(x, y, "Scan world on join",
                 () -> config.scanOnWorldJoin, value -> config.scanOnWorldJoin = value));
-        y += ROW_HEIGHT;
 
-        addRenderableWidget(toggle(x, y, "Count items inside shulker boxes",
+        x = columnX(); y = rowY();
+        place(toggle(x, y, "Count items inside shulker boxes",
                 () -> config.includeNested, value -> config.includeNested = value));
-        y += ROW_HEIGHT;
 
-        addRenderableWidget(toggle(x, y, "Show machines by default",
+        x = columnX(); y = rowY();
+        place(toggle(x, y, "Show machines by default",
                 () -> config.showMachines, value -> config.showMachines = value));
-        y += ROW_HEIGHT;
+
+        x = columnX(); y = rowY();
 
         // Past the top of the range this reads "unlimited" rather than a
         // number: someone dragging it to the end means "stop hiding things",
         // not "exactly two thousand".
-        addRenderableWidget(new IntSlider(x, y, config.maxResults, 0, MAX_RESULTS_CEILING, RESULTS_STEP) {
+        place(new IntSlider(x, y, config.maxResults, 0, MAX_RESULTS_CEILING, RESULTS_STEP) {
             @Override
             String label(int value) {
                 return "Items shown: " + (value >= MAX_RESULTS_CEILING ? "unlimited" : Integer.toString(value));
@@ -81,12 +115,12 @@ public final class ConfigScreen extends Screen {
                         ? ChestTrackerConfig.UNLIMITED_RESULTS : value;
             }
         });
-        y += ROW_HEIGHT;
 
-        addRenderableWidget(displayCycle(x, y));
-        y += ROW_HEIGHT;
+        x = columnX(); y = rowY();
+        place(displayCycle(x, y));
 
-        addRenderableWidget(new IntSlider(x, y, config.highlightSeconds, 5, HIGHLIGHT_MAX, 5) {
+        x = columnX(); y = rowY();
+        place(new IntSlider(x, y, config.highlightSeconds, 5, HIGHLIGHT_MAX, 5) {
             @Override
             String label(int value) {
                 return "Guidance lasts: " + value + "s";
@@ -97,9 +131,9 @@ public final class ConfigScreen extends Screen {
                 config.highlightSeconds = value;
             }
         });
-        y += ROW_HEIGHT;
 
-        addRenderableWidget(new IntSlider(x, y, config.highlightRecedingGraceSeconds, 1, GRACE_MAX, 1) {
+        x = columnX(); y = rowY();
+        place(new IntSlider(x, y, config.highlightRecedingGraceSeconds, 1, GRACE_MAX, 1) {
             @Override
             String label(int value) {
                 return "Grace when walking away: " + value + "s";
@@ -110,13 +144,29 @@ public final class ConfigScreen extends Screen {
                 config.highlightRecedingGraceSeconds = value;
             }
         });
-        y += ROW_HEIGHT + 10;
 
-        addRenderableWidget(accessCycle(x, y));
-        y += ROW_HEIGHT + 8;
+        x = columnX(); y = rowY();
+        place(toggle(x, y, "Trail of marks above matches",
+                () -> config.guideBeam, value -> config.guideBeam = value));
 
+        x = columnX(); y = rowY();
+        place(toggle(x, y, "Open a match already in reach",
+                () -> config.openInReach, value -> config.openInReach = value));
+
+        x = columnX(); y = rowY();
+        place(toggle(x, y, "Turn to face a match",
+                () -> config.turnToTarget, value -> config.turnToTarget = value));
+
+        x = columnX(); y = rowY();
+        place(toggle(x, y, "Search button on containers",
+                () -> config.containerSearchButton, value -> config.containerSearchButton = value));
+
+        x = columnX(); y = rowY();
+        place(accessCycle(x, y));
+
+        int bottom = 40 + ROWS_PER_COLUMN * ROW_HEIGHT + 12;
         addRenderableWidget(Button.builder(Component.literal("Done"), button -> onClose())
-                .bounds(width / 2 - 60, y, 120, 20).build());
+                .bounds(width / 2 - 60, bottom, 120, 20).build());
     }
 
     /**
@@ -239,7 +289,7 @@ public final class ConfigScreen extends Screen {
                 width / 2 - font.width("ChestTracker Settings") / 2, 18, 0xFFFFFFFF);
 
         String footer = Minecraft.getInstance().hasSingleplayerServer()
-                ? "The last setting only applies once you open this world to LAN."
+                ? "The access setting only applies once you open this world to LAN."
                 : "Scanning happens in the background; a large world fills in over time.";
         gfx.text(font, Component.literal(footer),
                 width / 2 - font.width(footer) / 2, height - 34, 0xFFA0A0A0);
