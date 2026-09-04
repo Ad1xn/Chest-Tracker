@@ -60,7 +60,8 @@ public final class ChestTrackerScreen extends Screen {
     private static final int SLOTS_W = 169;       // left border plus nine slots
     private static final int SCROLL_COL = 14;     // widened for the scrollbar
     private static final int EDGE_W = 7;          // the window's side border
-    private static final int FILLER_U = 100;      // a uniform column of the borders
+    private static final int FILLER_U = 100;      // a uniform column of the border bands
+    private static final int SLOT_FILLER_U = 170; // flat panel between slots and edge
 
     private static final int COLS = 9;
     private static final int ROWS = 6;
@@ -68,7 +69,6 @@ public final class ChestTrackerScreen extends Screen {
     private static final int SEARCH_H = 16;
 
     // Vanilla's container palette, for the parts drawn rather than blitted.
-    private static final int PANEL_FILL = 0xFFC6C6C6;
     private static final int BEVEL_LIGHT = 0xFFFFFFFF;
     private static final int BEVEL_DARK = 0xFF555555;
     private static final int GROOVE = 0xFF8B8B8B;
@@ -220,9 +220,15 @@ public final class ChestTrackerScreen extends Screen {
 
     // --- drawing -----------------------------------------------------------
 
+    /**
+     * Everything drawn on top of the widgets.
+     *
+     * <p>The window itself is deliberately not drawn here. Widgets render
+     * between the background and this, so painting the panel at this point put
+     * it over the search field and hid whatever was being typed.
+     */
     private void draw(Gfx gfx, int mouseX, int mouseY) {
         hoverLabel = null;
-        drawWindow(gfx);
         drawButtons(gfx, mouseX, mouseY);
 
         if (unavailable) {
@@ -281,21 +287,44 @@ public final class ChestTrackerScreen extends Screen {
                 GUI_W - EDGE_W, srcV, EDGE_W, height, SHEET, SHEET);
     }
 
-    /** The slot rows, whose middle is flat panel rather than repeatable art. */
+    /**
+     * The slot rows. The gap left by widening for the scrollbar is filled from
+     * the flat strip between the last slot and the window edge, repeated a pixel
+     * at a time - not with a fixed colour. A resource pack repaints this texture,
+     * and a hardcoded grey would sit in the middle of someone's brown chest.
+     */
     private void drawSlotBand(Gfx gfx, int destY) {
         gfx.blit(CONTAINER_TEXTURE, panelX, destY, 0, ROWS_V, SLOTS_W, ROWS_H, SHEET, SHEET);
-        gfx.fill(panelX + SLOTS_W, destY, panelX + panelW - EDGE_W, destY + ROWS_H, PANEL_FILL);
+        for (int i = 0; i < SCROLL_COL; i++) {
+            gfx.blit(CONTAINER_TEXTURE, panelX + SLOTS_W + i, destY,
+                    SLOT_FILLER_U, ROWS_V, 1, ROWS_H, SHEET, SHEET);
+        }
         gfx.blit(CONTAINER_TEXTURE, panelX + panelW - EDGE_W, destY,
                 GUI_W - EDGE_W, ROWS_V, EDGE_W, ROWS_H, SHEET, SHEET);
     }
 
+    /** The search strip, also built from the texture so packs carry through. */
     private void drawSearchStrip(Gfx gfx, int searchY) {
-        gfx.fill(panelX, searchY, panelX + panelW, searchY + SEARCH_H, PANEL_FILL);
-        // Carry the side borders through the strip so the window edge is unbroken.
         gfx.blit(CONTAINER_TEXTURE, panelX, searchY, 0, 30, EDGE_W, SEARCH_H, SHEET, SHEET);
+        for (int x = panelX + EDGE_W; x < panelX + panelW - EDGE_W; x++) {
+            gfx.blit(CONTAINER_TEXTURE, x, searchY, SLOT_FILLER_U, 30, 1, SEARCH_H, SHEET, SHEET);
+        }
         gfx.blit(CONTAINER_TEXTURE, panelX + panelW - EDGE_W, searchY,
                 GUI_W - EDGE_W, 30, EDGE_W, SEARCH_H, SHEET, SHEET);
         drawGroove(gfx, panelX + 7, searchY + 2, panelW - 14, 12);
+    }
+
+    /**
+     * Fills a rectangle with the window's own flat panel pixels.
+     *
+     * <p>Used instead of a fixed colour for the parts vanilla has no art for -
+     * the scrollbar thumb and the toolbar buttons - so they follow a resource
+     * pack rather than sitting in it as grey rectangles.
+     */
+    private void fillFromTexture(Gfx gfx, int x, int y, int w, int h) {
+        for (int i = 0; i < w; i++) {
+            gfx.blit(CONTAINER_TEXTURE, x + i, y, SLOT_FILLER_U, ROWS_V, 1, h, SHEET, SHEET);
+        }
     }
 
     /** The inset used by vanilla for slots and text fields. */
@@ -364,7 +393,7 @@ public final class ChestTrackerScreen extends Screen {
         int travel = height - 2 - thumbHeight;
         int thumbY = y + 1 + (maxScroll == 0 ? 0 : travel * scrollRow / maxScroll);
 
-        gfx.fill(x + 1, thumbY, x + 11, thumbY + thumbHeight, PANEL_FILL);
+        fillFromTexture(gfx, x + 1, thumbY, 10, thumbHeight);
         gfx.fill(x + 1, thumbY, x + 11, thumbY + 1, BEVEL_LIGHT);
         gfx.fill(x + 1, thumbY, x + 2, thumbY + thumbHeight, BEVEL_LIGHT);
         gfx.fill(x + 1, thumbY + thumbHeight - 1, x + 11, thumbY + thumbHeight, BEVEL_DARK);
@@ -400,7 +429,11 @@ public final class ChestTrackerScreen extends Screen {
             boolean hovered = mouseX >= x && mouseX < x + 12 && mouseY >= y && mouseY < y + 12;
 
             gfx.fill(x, y, x + 12, y + 12, BEVEL_DARK);
-            gfx.fill(x, y, x + 11, y + 11, button.active() ? BUTTON_ON : PANEL_FILL);
+            if (button.active()) {
+                gfx.fill(x, y, x + 11, y + 11, BUTTON_ON);
+            } else {
+                fillFromTexture(gfx, x, y, 11, 11);
+            }
             gfx.fill(x, y, x + 11, y + 1, BEVEL_LIGHT);
             gfx.fill(x, y, x + 1, y + 11, BEVEL_LIGHT);
             if (hovered) {
@@ -584,8 +617,24 @@ public final class ChestTrackerScreen extends Screen {
         return true;
     }
 
-    // The one signature the Gfx facade cannot hide: 26.x renamed the entry point
-    // and changed its parameter type as part of the deferred-rendering rework.
+    // Two signatures the Gfx facade cannot hide: 26.x renamed both the render
+    // entry point and the background hook, and changed their parameter types as
+    // part of the deferred-rendering rework. The window is drawn in the
+    // background hook so the search field renders on top of it rather than under.
+    //? if >=26.1 {
+    /*@Override
+    public void extractBackground(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float partialTick) {
+        super.extractBackground(graphics, mouseX, mouseY, partialTick);
+        drawWindow(new Gfx(graphics));
+    }
+    *///?} else {
+    @Override
+    public void renderBackground(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
+        super.renderBackground(graphics, mouseX, mouseY, partialTick);
+        drawWindow(new Gfx(graphics));
+    }
+    //?}
+
     //? if >=26.1 {
     /*@Override
     public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float partialTick) {
