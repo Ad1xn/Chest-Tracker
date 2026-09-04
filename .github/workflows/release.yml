@@ -1,0 +1,55 @@
+name: release
+
+# Publishes both Minecraft targets whenever a v* tag is pushed. Building here
+# rather than uploading a local jar means a release is always reproducible from
+# the tagged source.
+on:
+  push:
+    tags: [ 'v*' ]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to build and publish'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - name: Set up JDKs
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          # 25 last, so JAVA_HOME points at it: Loom validates the Gradle JVM
+          # itself, and the 26.2 target refuses to build on anything older.
+          java-version: |
+            21
+            25
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Build every target
+        run: ./gradlew build --stacktrace
+
+      - name: Collect jars
+        run: |
+          mkdir -p release
+          # Sources jars are not useful to players; ship only the mod jars.
+          find versions -path '*/build/libs/*.jar' ! -name '*-sources.jar' -exec cp {} release/ \;
+          ls -la release
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          gh release view "$TAG" >/dev/null 2>&1 \
+            || gh release create "$TAG" --title "$TAG" --generate-notes
+          gh release upload "$TAG" release/*.jar --clobber
