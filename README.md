@@ -9,6 +9,8 @@ you've physically opened them.
 
 Fabric · Minecraft **1.21.11** and **26.2**
 
+## This is a mod fully written by AI 
+
 ### Supported versions
 
 **1.21.11 and newer.** Both current targets sit in Minecraft's unobfuscated era, so adding another
