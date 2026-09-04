@@ -114,6 +114,9 @@ public final class ChestTrackerScreen extends Screen {
     private static final int MAX_CONTAINERS = 64;
     private static final int DETAIL_ROW = 11;
 
+    /** Breathing room between the list well's bevel and its first row. */
+    private static final int LIST_PAD = 3;
+
     /** Registry lookups are not free and slots redraw every frame. */
     private static final Map<String, ItemStack> ICON_CACHE = new HashMap<>();
 
@@ -141,6 +144,15 @@ public final class ChestTrackerScreen extends Screen {
     private List<QueryDto.ContainerHit> containers = List.of();
     private String selectedItemId;
     private int scrollRow;
+
+    /**
+     * First visible row of the container list, which scrolls separately.
+     *
+     * <p>Sharing the grid's offset would scroll one view by opening the other,
+     * and the two count in different units - rows of nine against single rows.
+     */
+    private int detailScroll;
+
     private boolean draggingScrollbar;
     private boolean menuOpen;
 
@@ -308,6 +320,9 @@ public final class ChestTrackerScreen extends Screen {
                     newestContainersReply = response.requestId();
                     containers = response.hits();
                     containersPending = false;
+                    // A background refresh can shorten the list under a kept
+                    // scroll position - a container was emptied or broken.
+                    detailScroll = Math.min(detailScroll, maxDetailScroll());
                 }));
     }
 
@@ -385,6 +400,7 @@ public final class ChestTrackerScreen extends Screen {
         selectedItemId = itemId;
         containers = List.of();
         containersPending = true;
+        detailScroll = 0;
         refreshContainers();
     }
 
@@ -408,8 +424,64 @@ public final class ChestTrackerScreen extends Screen {
         return panelX + SLOTS_W + 3;
     }
 
+    private int gridRows() {
+        return (items.size() + COLS - 1) / COLS;
+    }
+
     private int maxScrollRow() {
-        return Math.max(0, (items.size() + COLS - 1) / COLS - ROWS);
+        return Math.max(0, gridRows() - ROWS);
+    }
+
+    // The container list occupies the rectangle the slot art is blitted into,
+    // taken from where that art actually starts rather than from the grid's
+    // inner origin, so the list's bevel lands on the window's own border.
+
+    private int listLeft() {
+        return panelX + EDGE_W;
+    }
+
+    private int listTop() {
+        return panelY + TOP_H + SEARCH_H;
+    }
+
+    private int listWidth() {
+        return COLS * SLOT;
+    }
+
+    private int listHeight() {
+        return ROWS * SLOT;
+    }
+
+    /** Rows that fit inside the well. Anything past this has to be scrolled to. */
+    private int listRowsVisible() {
+        return (listHeight() - LIST_PAD * 2) / DETAIL_ROW;
+    }
+
+    private int maxDetailScroll() {
+        return Math.max(0, containers.size() - listRowsVisible());
+    }
+
+    private int listRowY(int row) {
+        return listTop() + LIST_PAD + row * DETAIL_ROW;
+    }
+
+    /**
+     * The container under the cursor, or -1.
+     *
+     * <p>One method for both the highlight and the click, so what lights up is
+     * always what gets selected. Deciding it twice is how a click lands on the
+     * row above the one being pointed at - and the old click test bounded
+     * neither the top of the pane nor its right edge, so the empty strip above
+     * the list guided the player to its first row.
+     */
+    private int rowAt(int mouseX, int mouseY) {
+        if (mouseX < listLeft() || mouseX >= listLeft() + listWidth()) return -1;
+        int offset = mouseY - listRowY(0);
+        if (offset < 0) return -1;
+        int row = offset / DETAIL_ROW;
+        if (row >= listRowsVisible()) return -1;
+        int index = detailScroll + row;
+        return index < containers.size() ? index : -1;
     }
 
     private int slotAt(int mouseX, int mouseY) {
@@ -455,9 +527,11 @@ public final class ChestTrackerScreen extends Screen {
 
         if (selectedItemId == null) {
             drawGrid(gfx, mouseX, mouseY);
-            drawScrollbar(gfx);
+            drawScrollbar(gfx, scrollRow, maxScrollRow(), gridRows(), ROWS);
         } else {
             drawLocations(gfx, mouseX, mouseY);
+            drawScrollbar(gfx, detailScroll, maxDetailScroll(),
+                    containers.size(), listRowsVisible());
         }
 
         String title = hoverLabel != null ? hoverLabel
@@ -562,6 +636,21 @@ public final class ChestTrackerScreen extends Screen {
         }
     }
 
+    /**
+     * A sunken panel with the window's own pixels inside it.
+     *
+     * <p>Like {@link #drawGroove} but without the flat grey fill, so a resource
+     * pack's chest shows through the middle of the list rather than a vanilla
+     * rectangle sitting in it.
+     */
+    private void drawWell(Gfx gfx, int x, int y, int w, int h) {
+        fillFromTexture(gfx, x, y, w, h);
+        gfx.fill(x, y, x + w - 1, y + 1, GROOVE_DARK);
+        gfx.fill(x, y, x + 1, y + h - 1, GROOVE_DARK);
+        gfx.fill(x + w - 1, y, x + w, y + h, BEVEL_LIGHT);
+        gfx.fill(x, y + h - 1, x + w, y + h, BEVEL_LIGHT);
+    }
+
     /** The inset used by vanilla for slots and text fields. */
     private void drawGroove(Gfx gfx, int x, int y, int w, int h) {
         gfx.fill(x, y, x + w, y + h, GROOVE_DARK);
@@ -616,17 +705,23 @@ public final class ChestTrackerScreen extends Screen {
         return (count / 1_000_000) + "m";
     }
 
-    private void drawScrollbar(Gfx gfx) {
+    /**
+     * The scrollbar for whichever view is open.
+     *
+     * <p>Both views scroll, so the bar is told what it is scrolling rather than
+     * reading the grid's numbers - a thumb sized off the item count while the
+     * container list was showing would describe the wrong list.
+     */
+    private void drawScrollbar(Gfx gfx, int scroll, int maxScroll, int totalRows, int visibleRows) {
         int x = scrollbarX();
         int y = gridY() - 1;
         int height = ROWS * SLOT;
         drawGroove(gfx, x, y, 12, height);
 
-        int maxScroll = maxScrollRow();
         int thumbHeight = maxScroll == 0 ? height - 2
-                : Math.max(15, (height - 2) * ROWS / ((items.size() + COLS - 1) / COLS));
+                : Math.max(15, (height - 2) * visibleRows / Math.max(1, totalRows));
         int travel = height - 2 - thumbHeight;
-        int thumbY = y + 1 + (maxScroll == 0 ? 0 : travel * scrollRow / maxScroll);
+        int thumbY = y + 1 + (maxScroll == 0 ? 0 : travel * scroll / maxScroll);
 
         fillFromTexture(gfx, x + 1, thumbY, 10, thumbHeight);
         gfx.fill(x + 1, thumbY, x + 11, thumbY + 1, BEVEL_LIGHT);
@@ -741,39 +836,74 @@ public final class ChestTrackerScreen extends Screen {
         }
     }
 
+    /**
+     * The containers holding the chosen item, one per row.
+     *
+     * <p>The rows get a well of their own rather than being written across the
+     * slot grid the window always draws. Nine bevelled squares behind every
+     * line of text is what made this pane unreadable: the grid's white edges
+     * struck through the glyphs, and its columns read as table rules that were
+     * not there.
+     */
     private void drawLocations(Gfx gfx, int mouseX, int mouseY) {
-        int x = gridX();
-        int y = gridY();
-        int bottom = gridY() + ROWS * SLOT;
+        drawWell(gfx, listLeft(), listTop(), listWidth(), listHeight());
+
+        int textX = listLeft() + 4;
+        int textWidth = listWidth() - 8;
 
         if (containers.isEmpty()) {
             gfx.text(font, Component.literal(containersPending ? "Looking..." : "Nothing holds that."),
-                    x, y, TEXT_MAIN);
+                    textX, listRowY(0), TEXT_MAIN);
             return;
         }
 
-        for (QueryDto.ContainerHit hit : containers) {
-            if (y + DETAIL_ROW > bottom) break;
-            boolean hovered = mouseX >= x && mouseX <= panelX + panelW - 10
-                    && mouseY >= y && mouseY < y + DETAIL_ROW;
-            if (hovered) gfx.fill(x - 1, y - 1, panelX + panelW - 10, y + DETAIL_ROW - 1, ROW_HOVER);
-            gfx.text(font, Component.literal(describe(hit)), x, y, TEXT_MAIN);
-            y += DETAIL_ROW;
+        int hovered = rowAt(mouseX, mouseY);
+        int last = Math.min(containers.size(), detailScroll + listRowsVisible());
+        for (int index = detailScroll; index < last; index++) {
+            QueryDto.ContainerHit hit = containers.get(index);
+            int y = listRowY(index - detailScroll);
+            if (index == hovered) {
+                gfx.fill(listLeft() + 1, y - 1, listLeft() + listWidth() - 1,
+                        y + DETAIL_ROW - 1, ROW_HOVER);
+            }
+
+            // Two columns rather than one string: at 162 pixels a row of four
+            // facts does not fit any world with five-digit coordinates, and
+            // trimming one string drops whatever is last. The distance is the
+            // field a player is choosing on, so it is anchored to the right and
+            // the description gives way first.
+            String distance = distanceOf(hit);
+            int distanceWidth = font.width(distance);
+            gfx.text(font, Component.literal(distance),
+                    listLeft() + listWidth() - 4 - distanceWidth, y, TEXT_MAIN);
+            gfx.text(font, Component.literal(
+                            truncate(describe(hit), textWidth - distanceWidth - 4)),
+                    textX, y, TEXT_MAIN);
         }
         hoverLabel = "Click to be guided  -  right-click to go back";
     }
 
+    /**
+     * A row's left column: how much, in what, and how sure we are of it.
+     *
+     * <p>The marks come before the position rather than after it, so that the
+     * one part of the row that can be trimmed is the part a player does not
+     * need to read - guidance walks them there, the coordinates are a courtesy.
+     */
     private String describe(QueryDto.ContainerHit hit) {
         StringBuilder line = new StringBuilder();
-        line.append(hit.matchedCount()).append("x ")
-                .append(shortName(hit.typeId()))
-                .append("  ").append(BlockKey.toString(hit.pos()))
-                .append(String.format("  %.0fm", Math.sqrt(hit.distanceSq())));
+        line.append(hit.matchedCount()).append("x ").append(shortName(hit.typeId()));
         if (hit.nested()) line.append(" *");
         // A container we have only ever seen from the outside must not read as
         // one we have counted - "?" is honest, an unmarked row is not.
         if (!hit.contentsKnown()) line.append(" ?");
+        line.append("  ").append(BlockKey.toString(hit.pos()));
         return line.toString();
+    }
+
+    /** A row's right column. */
+    private static String distanceOf(QueryDto.ContainerHit hit) {
+        return String.format("%.0fm", Math.sqrt(hit.distanceSq()));
     }
 
     // --- item display ------------------------------------------------------
@@ -846,22 +976,23 @@ public final class ChestTrackerScreen extends Screen {
         }
 
         if (event.button() == 0) {
+            // The bar serves both views, so it is tested before either of them.
+            if (mouseX >= scrollbarX() && mouseX < scrollbarX() + 12
+                    && mouseY >= gridY() - 1 && mouseY < gridY() - 1 + ROWS * SLOT) {
+                draggingScrollbar = true;
+                dragScrollbar(mouseY);
+                return true;
+            }
             if (selectedItemId == null) {
-                if (mouseX >= scrollbarX() && mouseX < scrollbarX() + 12
-                        && mouseY >= gridY() - 1 && mouseY < gridY() - 1 + ROWS * SLOT) {
-                    draggingScrollbar = true;
-                    dragScrollbar(mouseY);
-                    return true;
-                }
                 int index = slotAt(mouseX, mouseY);
                 if (index >= 0) {
                     selectItem(items.get(index).itemId());
                     return true;
                 }
-            } else if (!containers.isEmpty()) {
-                int row = (mouseY - gridY()) / DETAIL_ROW;
-                if (row >= 0 && row < containers.size() && mouseX >= gridX()) {
-                    guideTo(containers.get(row));
+            } else {
+                int index = rowAt(mouseX, mouseY);
+                if (index >= 0) {
+                    guideTo(containers.get(index));
                     return true;
                 }
             }
@@ -932,10 +1063,16 @@ public final class ChestTrackerScreen extends Screen {
 
     private void dragScrollbar(int mouseY) {
         int height = ROWS * SLOT;
-        int maxScroll = maxScrollRow();
+        boolean grid = selectedItemId == null;
+        int maxScroll = grid ? maxScrollRow() : maxDetailScroll();
         if (maxScroll == 0) return;
         double fraction = (mouseY - (gridY() - 1)) / (double) height;
-        scrollRow = Math.max(0, Math.min(maxScroll, (int) Math.round(fraction * maxScroll)));
+        int row = Math.max(0, Math.min(maxScroll, (int) Math.round(fraction * maxScroll)));
+        if (grid) {
+            scrollRow = row;
+        } else {
+            detailScroll = row;
+        }
     }
 
     @Override
@@ -962,8 +1099,13 @@ public final class ChestTrackerScreen extends Screen {
 
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double deltaX, double deltaY) {
+        int step = (int) Math.signum(deltaY);
         if (selectedItemId == null) {
-            scrollRow = Math.max(0, Math.min(maxScrollRow(), scrollRow - (int) Math.signum(deltaY)));
+            scrollRow = Math.max(0, Math.min(maxScrollRow(), scrollRow - step));
+        } else {
+            // The list used to swallow the wheel silently, which read as a
+            // frozen pane whenever an item was in more places than fit.
+            detailScroll = Math.max(0, Math.min(maxDetailScroll(), detailScroll - step));
         }
         return true;
     }
