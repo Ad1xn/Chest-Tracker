@@ -58,14 +58,8 @@ public final class ContainerScreens {
     private static boolean keyWasDown;
     private static long lastTrigger;
 
-    /**
-     * The container screen currently open, or null.
-     *
-     * <p>Tracked here rather than read off {@code Minecraft}: the field is
-     * public on 1.21.11 and has no accessor at all on 26.2, and this is handed
-     * the screen anyway. Cleared on removal, so it holds nothing once closed.
-     */
-    private static AbstractContainerScreen<?> openContainer;
+    /** Logged once, to settle whether screen init events arrive here at all. */
+    private static boolean reportedInit;
 
     public static void register(KeyMapping searchHovered) {
         searchKey = searchHovered;
@@ -82,13 +76,11 @@ public final class ContainerScreens {
                         access.chesttracker$topPos()));
             }
 
-            openContainer = container;
-            ScreenEvents.remove(screen).register(closed -> {
-                if (openContainer == closed) {
-                    openContainer = null;
-                    keyWasDown = false;
-                }
-            });
+            if (!reportedInit) {
+                reportedInit = true;
+                ChestTracker.LOG.info("Container screen hook installed on {}",
+                        container.getClass().getName());
+            }
 
             ScreenKeyboardEvents.beforeKeyPress(screen).register((ignored, keyEvent) -> {
                 if (searchHovered.matches(keyEvent)) trigger(container, "screen event");
@@ -103,8 +95,11 @@ public final class ContainerScreens {
      * else is handling input. Edge-triggered: holding the key searches once.
      */
     public static void tick() {
-        AbstractContainerScreen<?> container = openContainer;
         Minecraft client = Minecraft.getInstance();
+        // Asked of the game directly rather than remembered from an event, so
+        // this works even where the screen events do not arrive.
+        AbstractContainerScreen<?> container =
+                ClientCompat.currentScreen() instanceof AbstractContainerScreen<?> open ? open : null;
         if (container == null || searchKey == null || client.getWindow() == null) {
             // Reset outside a container, so reopening one with the key already
             // held is not mistaken for a fresh press.

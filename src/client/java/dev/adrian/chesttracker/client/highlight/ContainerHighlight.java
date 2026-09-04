@@ -100,10 +100,27 @@ public final class ContainerHighlight {
         positions = List.of();
     }
 
+    /**
+     * How much bigger a box gets per block of distance.
+     *
+     * <p>A one-block cube is a couple of pixels across at a hundred blocks -
+     * findable only if you already know where to look, which defeats the point.
+     * Growing it with distance keeps roughly the apparent size instead of
+     * shrinking to nothing, so scanning a base for the box actually works.
+     */
+    private static final double GROW_PER_BLOCK = 0.03;
+
+    /** Past this the box would swallow the building it is in. */
+    private static final double MAX_GROW = 3.0;
+
+    private static final float BASE_LINE_WIDTH = 2.5f;
+    private static final float LINE_WIDTH_PER_BLOCK = 0.06f;
+    private static final float MAX_LINE_WIDTH = 8.0f;
+
     /** Whether there is anything for the world renderer to draw. */
     public boolean hasBoxes() {
         return timer.isActive() && !positions.isEmpty()
-                && ChestTrackerConfig.get().inWorldHighlight;
+                && ChestTrackerConfig.get().highlightDisplay().drawsBoxes();
     }
 
     /**
@@ -128,7 +145,16 @@ public final class ContainerHighlight {
             double dx = x + 0.5 - eye.x;
             double dy = y + 0.5 - eye.y;
             double dz = z + 0.5 - eye.z;
-            if (dx * dx + dy * dy + dz * dz > DRAW_RADIUS * DRAW_RADIUS) continue;
+            double distSq = dx * dx + dy * dy + dz * dz;
+            if (distSq > DRAW_RADIUS * DRAW_RADIUS) continue;
+
+            // Both the box and its lines grow with distance, so a container
+            // across a base is something you can find by looking rather than
+            // something you have to already be pointing at.
+            double distance = Math.sqrt(distSq);
+            double grow = Math.min(MAX_GROW, distance * GROW_PER_BLOCK);
+            float width = (float) Math.min(MAX_LINE_WIDTH,
+                    BASE_LINE_WIDTH + distance * LINE_WIDTH_PER_BLOCK);
 
             // The nearest one is picked out, because that is the one the action
             // bar is talking about and the one the player is walking towards.
@@ -137,7 +163,7 @@ public final class ContainerHighlight {
                     nearest ? 1.0f : 0.25f,
                     nearest ? 0.82f : 0.85f,
                     nearest ? 0.2f : 1.0f,
-                    0.9f);
+                    0.9f, grow, width);
             drawn++;
         }
     }
@@ -194,6 +220,8 @@ public final class ContainerHighlight {
         if (!timer.update(distance, System.currentTimeMillis())) {
             return;
         }
+
+        if (!ChestTrackerConfig.get().highlightDisplay().writesActionBar()) return;
 
         if (distance <= ARRIVAL_DISTANCE) {
             ClientCompat.actionBar(Component.literal(label + " - you are here")

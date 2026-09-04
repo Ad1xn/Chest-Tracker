@@ -166,14 +166,49 @@ public final class ChestTrackerConfig {
 
     // --- Highlight --------------------------------------------------------
 
+    /** How a highlight tells the player where the containers are. */
+    public enum Display {
+        /** Boxes in the world, nothing above the hotbar. */
+        BOXES,
+        /** A bearing and a distance above the hotbar, no boxes. */
+        ACTION_BAR,
+        BOTH,
+        NONE;
+
+        /** Unknown text reads as the default rather than throwing on a typo. */
+        public static Display parse(String value) {
+            if (value == null) return BOXES;
+            for (Display display : values()) {
+                if (display.name().equalsIgnoreCase(value.trim())) return display;
+            }
+            return BOXES;
+        }
+
+        public boolean drawsBoxes() {
+            return this == BOXES || this == BOTH;
+        }
+
+        public boolean writesActionBar() {
+            return this == ACTION_BAR || this == BOTH;
+        }
+    }
+
     /**
-     * Draw a box around tracked containers in the world.
+     * Which of the two ways of showing a highlight are used.
      *
-     * <p>On by default: the action bar can only ever describe one container,
-     * and "there are also four more behind you" is exactly what a box says
-     * better than a sentence.
+     * <p>Boxes alone by default. The action bar can only ever describe one
+     * container, and "there are four more behind you" is something a box says
+     * better than a sentence - so once the boxes exist, the text is a second
+     * description of the same thing competing for the same strip of screen.
+     *
+     * <p>Replaces an earlier {@code inWorldHighlight} boolean; an old config
+     * file simply falls back to this default.
      */
-    public boolean inWorldHighlight = true;
+    public String highlightDisplay = Display.BOXES.name();
+
+    public Display highlightDisplay() {
+        return Display.parse(highlightDisplay);
+    }
 
     /** Seconds a highlight lasts while the player keeps making progress towards it. */
     public int highlightSeconds = 45;

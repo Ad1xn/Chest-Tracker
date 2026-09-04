@@ -43,6 +43,25 @@ public final class ClientCompat {
         //?}
     }
 
+    /**
+     * The screen currently open, or null.
+     *
+     * <p>26.x moved the screen off {@code Minecraft} entirely - it lives on the
+     * {@code Gui} now, and there is no accessor left on {@code Minecraft} at
+     * all, where 1.21.11 still has it as a public field.
+     *
+     * <p>Wanted so that watching for an in-container key press does not have to
+     * be told which screen is open by an event that may never arrive.
+     */
+    public static Screen currentScreen() {
+        Minecraft client = Minecraft.getInstance();
+        //? if >=26.1 {
+        /*return client.gui == null ? null : client.gui.screen();
+        *///?} else {
+        return client.screen;
+        //?}
+    }
+
     /** {@code setScreenAndShow} exists on both versions; {@code setScreen} does not. */
     public static void openScreen(Screen screen) {
         Minecraft.getInstance().setScreenAndShow(screen);
