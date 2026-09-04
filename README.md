@@ -1,4 +1,4 @@
-# ChestTracker
+# ChestTracker - This mod was fully written using Claude Code!
 
 Find your stuff without opening a single chest.
 
@@ -8,8 +8,6 @@ chunks that aren't loaded — and lets you search it. It's a proactive replaceme
 you've physically opened them.
 
 Fabric · Minecraft **1.21.11** and **26.2**
-
-## This is a mod fully written by AI 
 
 ### Supported versions
 
