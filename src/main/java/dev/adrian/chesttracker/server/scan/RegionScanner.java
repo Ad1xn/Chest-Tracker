@@ -240,11 +240,16 @@ public final class RegionScanner {
     /**
      * Applies finished batches on the server thread, under a per-tick budget.
      *
-     * @param isChunkLoaded tells whether a chunk is currently loaded, in which
-     *                      case the live index wins and the disk copy is dropped
+     * @param isChunkLoaded  whether a chunk is currently loaded, in which case
+     *                       its on-disk copy may be stale and must not be used
+     * @param liveScanChunk  indexes a loaded chunk from memory instead. Without
+     *                       this the chunks a player is standing in would be the
+     *                       one place a world scan never reaches
      * @return how many chunks were applied this tick
      */
-    public int drain(java.util.function.BiPredicate<String, Long> isChunkLoaded, long tickTimeNanos) {
+    public int drain(java.util.function.BiPredicate<String, Long> isChunkLoaded,
+                     java.util.function.BiConsumer<String, Long> liveScanChunk,
+                     long tickTimeNanos) {
         if (tickTimeNanos > TICK_TIME_BUDGET_NANOS) return 0;
 
         int applied = 0;
@@ -253,7 +258,9 @@ public final class RegionScanner {
             applied++;
 
             if (isChunkLoaded.test(batch.dimensionId(), batch.chunkKey())) {
-                // Loaded chunks may hold unsaved changes; LiveScanner owns them.
+                // A loaded chunk may hold unsaved changes, so the disk copy is
+                // not trustworthy - but it still has to be indexed, from memory.
+                liveScanChunk.accept(batch.dimensionId(), batch.chunkKey());
                 chunksSkippedLoaded.incrementAndGet();
                 continue;
             }

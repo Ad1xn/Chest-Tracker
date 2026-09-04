@@ -33,6 +33,17 @@ public final class Trackers {
     /** Dimension ids are needed on a hot path; building the string each time is not free. */
     private static final Map<ResourceKey<Level>, String> DIMENSION_IDS = new ConcurrentHashMap<>();
 
+    /**
+     * Containers whose contents changed and need re-reading.
+     *
+     * <p>A set, so an item sorter firing twenty times a second collapses into a
+     * single entry, and only a bounded number are re-read per tick.
+     */
+    private static final Map<String, java.util.Set<Long>> DIRTY = new ConcurrentHashMap<>();
+
+    /** Re-reads per tick. Enough to feel instant, small enough to be invisible. */
+    private static final int DIRTY_BUDGET_PER_TICK = 48;
+
     private Trackers() {}
 
     public static void setCurrent(TrackerService service, net.minecraft.server.MinecraftServer minecraftServer) {
@@ -73,6 +84,7 @@ public final class Trackers {
 
     public static void clear() {
         if (regionScanner != null) regionScanner.cancel();
+        DIRTY.clear();
         regionScanner = null;
         server = null;
         current = null;
@@ -105,6 +117,74 @@ public final class Trackers {
         if (blockEntity == null || !ContainerTypes.isContainer(blockEntity)) {
             tracker.remove(dimensionId, key);
         }
+    }
+
+    /**
+     * Called whenever a block entity reports a change.
+     *
+     * <p>Marks it for re-reading; the work happens on the tick drain. Without
+     * this the index only ever learns a container's contents when its chunk
+     * unloads, so filling a chest you just placed would never show up.
+     */
+    public static void onContainerChanged(BlockEntity blockEntity) {
+        TrackerService tracker = current;
+        if (tracker == null) return;
+
+        Level level = blockEntity.getLevel();
+        // setChanged fires on the client too, where there is nothing to index.
+        if (!(level instanceof ServerLevel)) return;
+        if (!ContainerTypes.isContainer(blockEntity)) return;
+
+        BlockPos pos = blockEntity.getBlockPos();
+        if (!BlockKey.isRepresentable(pos.getX(), pos.getY(), pos.getZ())) return;
+
+        DIRTY.computeIfAbsent(dimensionId(level), id -> java.util.concurrent.ConcurrentHashMap.newKeySet())
+                .add(BlockKey.pack(pos.getX(), pos.getY(), pos.getZ()));
+    }
+
+    /**
+     * Re-reads a bounded number of changed containers.
+     *
+     * @return how many were refreshed this tick
+     */
+    public static int drainDirty() {
+        TrackerService tracker = current;
+        if (tracker == null || DIRTY.isEmpty()) return 0;
+
+        int done = 0;
+        for (Map.Entry<String, java.util.Set<Long>> entry : DIRTY.entrySet()) {
+            ServerLevel level = levelFor(entry.getKey());
+            java.util.Set<Long> positions = entry.getValue();
+            if (level == null) {
+                positions.clear();
+                continue;
+            }
+
+            var scanner = new dev.adrian.chesttracker.server.scan.LiveScanner(tracker);
+            var iterator = positions.iterator();
+            while (iterator.hasNext() && done < DIRTY_BUDGET_PER_TICK) {
+                long pos = iterator.next();
+                iterator.remove();
+                scanner.refreshIfLoaded(level, entry.getKey(), pos);
+                done++;
+            }
+            if (done >= DIRTY_BUDGET_PER_TICK) break;
+        }
+        return done;
+    }
+
+    /** Indexes one currently-loaded chunk, for chunks the region scan cannot use. */
+    public static void liveScanChunk(String dimensionId, long chunkKey) {
+        TrackerService tracker = current;
+        if (tracker == null) return;
+        ServerLevel level = levelFor(dimensionId);
+        if (level == null) return;
+
+        var chunk = level.getChunkSource()
+                .getChunkNow(BlockKey.chunkX(chunkKey), BlockKey.chunkZ(chunkKey));
+        if (chunk == null) return;
+        new dev.adrian.chesttracker.server.scan.LiveScanner(tracker)
+                .scanChunk(level, chunk, dimensionId);
     }
 
     /** Called when a player places a block, so we can attribute ownership. */

@@ -4,8 +4,9 @@
   "package": "dev.adrian.chesttracker.mixin",
   "compatibilityLevel": "JAVA_21",
   "mixins": [
-    "LevelMixin",
-    "BlockMixin"
+    "BlockEntityMixin",
+    "BlockMixin",
+    "LevelMixin"
   ],
   "client": [],
   "server": [],
