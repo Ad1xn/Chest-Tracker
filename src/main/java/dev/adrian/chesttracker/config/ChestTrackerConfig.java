@@ -166,6 +166,15 @@ public final class ChestTrackerConfig {
 
     // --- Highlight --------------------------------------------------------
 
+    /**
+     * Draw a box around tracked containers in the world.
+     *
+     * <p>On by default: the action bar can only ever describe one container,
+     * and "there are also four more behind you" is exactly what a box says
+     * better than a sentence.
+     */
+    public boolean inWorldHighlight = true;
+
     /** Seconds a highlight lasts while the player keeps making progress towards it. */
     public int highlightSeconds = 45;
 

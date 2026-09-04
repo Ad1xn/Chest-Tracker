@@ -165,9 +165,21 @@ public final class ChunkExtractor {
             NbtCompound start = starts.getCompound(structureId);
             if (start == null) continue;
 
-            addBox(boxes, structureId, start.getIntArray("BB"));
-            for (NbtCompound child : start.getCompoundList("Children")) {
-                addBox(boxes, structureId, child.getIntArray("BB"));
+            // Pieces only, not the structure's own BB. A village's overall box
+            // is enormous - it spans the whole settlement including the fields,
+            // the paths and everything a player has since built among them - so
+            // testing against it declares a base built in a village to be
+            // generated. The pieces are the actual buildings.
+            //
+            // A structure with no children has nothing finer to offer, and its
+            // own box is the piece.
+            List<NbtCompound> pieces = start.getCompoundList("Children");
+            if (pieces.isEmpty()) {
+                addBox(boxes, structureId, start.getIntArray("BB"));
+            } else {
+                for (NbtCompound piece : pieces) {
+                    addBox(boxes, structureId, piece.getIntArray("BB"));
+                }
             }
         }
         return boxes;
