@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.List;
 import java.util.Set;
+import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -33,6 +34,58 @@ class WorldIndexTest {
     private ContainerRecord chest(int x, int y, int z, StackEntry... contents) {
         return new ContainerRecord(BlockKey.pack(x, y, z), 0, CHEST, Origin.UNKNOWN,
                 null, false, true, null, 0L, List.of(contents));
+    }
+
+    private ContainerRecord ownedChest(int x, int y, int z, UUID owner, StackEntry... contents) {
+        return new ContainerRecord(BlockKey.pack(x, y, z), 0, CHEST, Origin.PLAYER_PLACED,
+                owner, false, true, null, 0L, List.of(contents));
+    }
+
+    @Test
+    void ownerFilterKeepsOnlyThatPlayersContainers() {
+        UUID mine = UUID.randomUUID();
+        UUID theirs = UUID.randomUUID();
+        index.put(ownedChest(0, 64, 0, mine, new StackEntry(DIAMOND, 5)));
+        index.put(ownedChest(0, 64, 4, theirs, new StackEntry(DIAMOND, 5)));
+
+        List<SearchResult> results = index.query(
+                IndexQuery.builder().item(DIAMOND).owner(mine).build());
+
+        assertEquals(1, results.size());
+        assertEquals(mine, results.get(0).container().owner());
+    }
+
+    @Test
+    void ownerFilterExcludesContainersWithNoKnownOwner() {
+        UUID mine = UUID.randomUUID();
+        // A generated chest nobody placed, so its owner was never observed. An
+        // owner-restricted query must drop it rather than treat "unknown" as
+        // "yours" - that is the difference between a permission tier and a leak.
+        index.put(chest(0, 64, 0, new StackEntry(DIAMOND, 5)));
+
+        assertTrue(index.query(IndexQuery.builder().item(DIAMOND).owner(mine).build()).isEmpty());
+    }
+
+    @Test
+    void noOwnerFilterMatchesEveryOwner() {
+        index.put(ownedChest(0, 64, 0, UUID.randomUUID(), new StackEntry(DIAMOND, 5)));
+        index.put(chest(0, 64, 4, new StackEntry(DIAMOND, 5)));
+
+        assertEquals(2, index.query(IndexQuery.builder().item(DIAMOND).build()).size());
+    }
+
+    @Test
+    void ownerFilterAppliesToSummaries() {
+        UUID mine = UUID.randomUUID();
+        index.put(ownedChest(0, 64, 0, mine, new StackEntry(DIAMOND, 5)));
+        index.put(ownedChest(0, 64, 4, UUID.randomUUID(), new StackEntry(DIAMOND, 60)));
+
+        List<WorldIndex.ItemSummary> summaries =
+                index.summarise(IndexQuery.builder().owner(mine).build());
+
+        assertEquals(1, summaries.size());
+        assertEquals(5, summaries.get(0).totalCount(),
+                "another player's stacks must not be counted into the total");
     }
 
     @Test

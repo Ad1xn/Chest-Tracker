@@ -3,6 +3,7 @@ package dev.adrian.chesttracker.core.index;
 import dev.adrian.chesttracker.core.model.Origin;
 
 import java.util.Set;
+import java.util.UUID;
 
 /**
  * A search against a {@link WorldIndex}. Empty filter sets mean "no constraint"
@@ -19,6 +20,12 @@ import java.util.Set;
  * @param unlootedOnly      only generated containers nobody has opened
  * @param knownContentsOnly drop location-only entries whose contents we cannot
  *                          know (the vanilla-server case)
+ * @param owner             restrict to containers this player placed; null
+ *                          means no owner constraint. This is what makes an
+ *                          "own containers only" permission tier expressible -
+ *                          without it the tier could only be enforced by
+ *                          filtering results afterwards, which would make the
+ *                          result limit count containers the player may not see
  * @param includeNested     whether a hit inside a shulker box counts
  * @param center            packed origin for distance ranking
  * @param maxDistance       in blocks; zero or less means unlimited
@@ -31,6 +38,7 @@ public record IndexQuery(
         Set<Integer> excludedTypeIds,
         boolean unlootedOnly,
         boolean knownContentsOnly,
+        UUID owner,
         boolean includeNested,
         long center,
         double maxDistance,
@@ -63,6 +71,7 @@ public record IndexQuery(
         private Set<Integer> excludedTypeIds = Set.of();
         private boolean unlootedOnly;
         private boolean knownContentsOnly;
+        private UUID owner;
         private boolean includeNested = true;
         private long center;
         private double maxDistance;
@@ -76,6 +85,7 @@ public record IndexQuery(
         public Builder excludeTypes(Set<Integer> ids) { this.excludedTypeIds = ids; return this; }
         public Builder unlootedOnly(boolean v) { this.unlootedOnly = v; return this; }
         public Builder knownContentsOnly(boolean v) { this.knownContentsOnly = v; return this; }
+        public Builder owner(UUID id) { this.owner = id; return this; }
         public Builder includeNested(boolean v) { this.includeNested = v; return this; }
         public Builder center(long packedPos) { this.center = packedPos; return this; }
         public Builder maxDistance(double blocks) { this.maxDistance = blocks; return this; }
@@ -83,7 +93,7 @@ public record IndexQuery(
 
         public IndexQuery build() {
             return new IndexQuery(itemIds, origins, typeIds, excludedTypeIds, unlootedOnly,
-                    knownContentsOnly, includeNested, center, maxDistance, limit);
+                    knownContentsOnly, owner, includeNested, center, maxDistance, limit);
         }
     }
 }

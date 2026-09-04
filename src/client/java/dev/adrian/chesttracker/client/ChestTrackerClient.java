@@ -3,6 +3,7 @@ package dev.adrian.chesttracker.client;
 import com.mojang.blaze3d.platform.InputConstants;
 import dev.adrian.chesttracker.ChestTracker;
 import dev.adrian.chesttracker.client.highlight.ContainerHighlight;
+import dev.adrian.chesttracker.client.net.ServerLink;
 import dev.adrian.chesttracker.client.platform.ClientCompat;
 import dev.adrian.chesttracker.client.ui.ChestTrackerScreen;
 import net.fabricmc.api.ClientModInitializer;
@@ -19,6 +20,10 @@ public final class ChestTrackerClient implements ClientModInitializer {
     public void onInitializeClient() {
         ChestTracker.LOG.info("ChestTracker initialising (client)");
 
+        // Receivers and connection state, so the screen knows what it is
+        // talking to before the player opens it.
+        ServerLink.register();
+
         // GRAVE matches the muscle memory of the mod this replaces.
         openSearch = ClientCompat.registerKeyMapping(new KeyMapping(
                 "key.chestindex.search",
@@ -33,6 +38,9 @@ public final class ChestTrackerClient implements ClientModInitializer {
                 ClientCompat.openScreen(new ChestTrackerScreen());
             }
             ContainerHighlight.get().tick();
+            // Expires the wait for a server that never announced itself, and
+            // any request whose reply is never coming.
+            ServerLink.tick();
         });
     }
 }

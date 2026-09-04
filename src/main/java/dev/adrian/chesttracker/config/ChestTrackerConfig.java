@@ -48,6 +48,61 @@ public final class ChestTrackerConfig {
     /** Whether items inside shulker boxes count as being in the outer container. */
     public boolean includeNested = true;
 
+    // --- Multiplayer ------------------------------------------------------
+
+    /**
+     * Who may query the index over the network.
+     *
+     * <p>Named rather than numbered so the file stays readable, and parsed
+     * leniently so a typo degrades to the safe end rather than to the open one.
+     */
+    public enum Access {
+        /** Anyone on the server. Right for a private world among friends. */
+        ALL,
+        /** Only containers the asking player placed. */
+        OWNED,
+        /** Operators only. */
+        OP;
+
+        /** Unknown text means OP: an unreadable setting must not open the index. */
+        public static Access parse(String value) {
+            if (value == null) return OP;
+            for (Access access : values()) {
+                if (access.name().equalsIgnoreCase(value.trim())) return access;
+            }
+            return OP;
+        }
+    }
+
+    /**
+     * Who may query this copy of the mod over the network.
+     *
+     * <p>Defaults to {@code OP} because a full world index is effectively loot
+     * x-ray: on a shared server it tells anyone where every unopened generated
+     * chest is, and what is in everybody else's base. Opening that up has to be
+     * the server owner's deliberate choice, so the default is the closed one.
+     *
+     * <p>Applies to every player who arrives over a connection, which includes
+     * guests in a world opened to LAN - a LAN host wanting to share the index
+     * sets this to {@code ALL}. The host themselves is never gated: their
+     * screen reads the integrated server directly and never goes near this.
+     */
+    public String permissionTier = Access.OP.name();
+
+    public Access permissionTier() {
+        return Access.parse(permissionTier);
+    }
+
+    /**
+     * How long the client waits for a server's hello before deciding there is
+     * no server-side index.
+     *
+     * <p>Long enough to cover a join under load, short enough that a vanilla
+     * server does not leave the screen saying "connecting" for any noticeable
+     * time.
+     */
+    public int serverHelloTimeoutMs = 3000;
+
     // --- Highlight --------------------------------------------------------
 
     /** Seconds a highlight lasts while the player keeps making progress towards it. */

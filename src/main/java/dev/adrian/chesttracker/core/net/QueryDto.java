@@ -18,6 +18,11 @@ import java.util.Set;
  * directly. One shape means the screen has a single code path whether or not a
  * network is involved, and the singleplayer path is not a special case that can
  * rot while nobody is looking.
+ *
+ * <p>Neither request carries a position or a dimension, deliberately. The
+ * server already knows where the asking player is, so sending it would add a
+ * value the server must either trust or ignore - and a client that could move
+ * the query centre could rank a search around somewhere it has never been.
  */
 public final class QueryDto {
 
@@ -29,6 +34,11 @@ public final class QueryDto {
         public static final int ORIGIN_ANY = 0;
         public static final int ORIGIN_PLAYER_PLACED = 1;
         public static final int ORIGIN_NATURAL = 2;
+
+        public Filters {
+            // A byte off the wire could name an origin that does not exist.
+            if (originFilter < ORIGIN_ANY || originFilter > ORIGIN_NATURAL) originFilter = ORIGIN_ANY;
+        }
 
         public static Filters defaults() {
             return new Filters(true, false, ORIGIN_ANY);
@@ -46,9 +56,15 @@ public final class QueryDto {
     /**
      * Ask for item totals.
      *
-     * @param text free text matched against item ids; blank means everything
+     * <p>The id is echoed in the reply. Every keystroke starts a query, replies
+     * need not arrive in the order they were asked for, and without this a slow
+     * early reply lands after a fast later one and shows results for a search
+     * the player has already moved on from.
+     *
+     * @param requestId caller's correlation id
+     * @param text      free text matched against item ids; blank means everything
      */
-    public record SummaryRequest(String text, Filters filters, long centre, int limit) {}
+    public record SummaryRequest(int requestId, String text, Filters filters, int limit) {}
 
     /**
      * One item, totalled across the containers holding it.
@@ -57,14 +73,14 @@ public final class QueryDto {
      */
     public record ItemSummary(String itemId, int totalCount, int containerCount, double nearestDistSq) {}
 
-    public record SummaryResponse(List<ItemSummary> items) {
+    public record SummaryResponse(int requestId, List<ItemSummary> items) {
         public SummaryResponse {
             items = items == null ? List.of() : List.copyOf(items);
         }
     }
 
     /** Ask where one item is. */
-    public record ContainerRequest(String itemId, Filters filters, long centre, int limit) {}
+    public record ContainerRequest(int requestId, String itemId, Filters filters, int limit) {}
 
     /**
      * One container holding the requested item.
@@ -75,9 +91,27 @@ public final class QueryDto {
     public record ContainerHit(String typeId, long pos, int matchedCount, double distanceSq,
                                boolean nested, boolean natural, boolean contentsKnown) {}
 
-    public record ContainerResponse(List<ContainerHit> hits) {
+    public record ContainerResponse(int requestId, List<ContainerHit> hits) {
         public ContainerResponse {
             hits = hits == null ? List.of() : List.copyOf(hits);
         }
+    }
+
+    /**
+     * Sent unprompted by a server that has the mod, once the player is in.
+     *
+     * <p>Custom payloads are silently dropped by a server that does not know
+     * them, so a client cannot learn by asking - a vanilla server's reply to a
+     * query is indistinguishable from a slow one. Announcing instead means the
+     * client waits a short grace period and then knows.
+     *
+     * @param canQuery whether this player's permission tier allows any query at
+     *                 all, so the screen can say "not allowed here" rather than
+     *                 showing an empty index
+     */
+    public record Hello(int protocolVersion, boolean canQuery) {
+
+        /** Bumped when the payload shapes change incompatibly. */
+        public static final int PROTOCOL_VERSION = 1;
     }
 }

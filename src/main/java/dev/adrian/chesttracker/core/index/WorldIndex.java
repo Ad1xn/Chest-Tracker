@@ -235,6 +235,10 @@ public final class WorldIndex {
         if (query.excludedTypeIds().contains(record.typeId())) return false;
         if (query.unlootedOnly() && !record.unlooted()) return false;
         if (query.knownContentsOnly() && !record.contentsKnown()) return false;
+        // An owner-restricted query must not fall back to "show everything" for
+        // records whose owner was never observed - a permission tier that leaks
+        // on missing data is not a permission tier.
+        if (query.owner() != null && !query.owner().equals(record.owner())) return false;
         return true;
     }
 

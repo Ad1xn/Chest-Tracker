@@ -16,7 +16,7 @@ containers after you physically open them.
 - Local: `/Users/adrian/chesttracker`
 - Targets: **MC 1.21.11 and 26.2**, Fabric, both first-class
 - Released: `v0.1.0`, with a GitHub Actions release workflow on `v*` tags
-- 88 unit tests, green on both targets
+- 105 unit tests, green on both targets
 
 ### The constraint that shapes everything
 
@@ -85,14 +85,16 @@ core/       PURE JAVA. No Minecraft, no Bukkit, no Fabric. Enforced by CorePurit
   anvil/    NbtReader/NbtCompound, RegionFile, WorldLayout, ChunkExtractor, OriginClassifier
   store/    StringPalette, IndexCodec (gzipped binary, atomic temp-file write)
   highlight/HighlightTimer  (the "moving towards it" rule, unit-tested)
-  net/      QueryDto  (wire shapes — Phase 7, written, not yet wired)
+  net/      QueryDto  (wire shapes, shared by both query routes)
   util/     BlockKey (our own long packing, NOT Minecraft's)
 
-platform/   version-conditional shims (server side)
-server/     TrackerService, Trackers (static hook target), LiveScanner, RegionScanner, commands
+platform/   version-conditional shims (server side), incl. NetworkCompat
+net/        CustomPacketPayload types + codecs, registration, server handlers
+server/     TrackerService, QueryService, Trackers (static hook target), LiveScanner,
+            RegionScanner, commands
 mixin/      BlockEntityMixin (setChanged), BlockMixin (setPlacedBy), LevelMixin (setBlock)
 client/     ChestTrackerScreen, ConfigScreen, ClientTracker, ContainerHighlight,
-            platform/Gfx + ClientCompat, ModMenuIntegration
+            net/ServerLink, platform/Gfx + ClientCompat, ModMenuIntegration
 ```
 
 `core` is deliberately game-free so one implementation serves both MC versions, everything is
@@ -117,13 +119,24 @@ guessing was wrong every single time.
 | HUD overlay | `Gui.setOverlayMessage` | `Gui.hud.setOverlayMessage` | `ClientCompat` |
 | Keybind helper | `KeyBindingHelper` | `KeyMappingHelper` | `ClientCompat` |
 | Mod Menu | 17.0.0 | 20.0.1 | per-version dependency |
+| `PayloadTypeRegistry` | `playC2S()` / `playS2C()` | `serverboundPlay()` / `clientboundPlay()` | `platform/NetworkCompat` |
 
 **Identical on both** (verified, no shim needed): `Container`, `ItemStack`, `BlockEntity`,
 `BuiltInRegistries`, `DataComponents`, `LevelChunk.getBlockEntities`, `ServerChunkCache.hasChunk`/
 `getChunkNow`, `MinecraftServer.getWorldPath`, `getCurrentSmoothedTickTime`, `setScreenAndShow`,
 `EditBox`, `KeyMapping.Category`, `mouseClicked(MouseButtonEvent, boolean)`, `mouseDragged`,
 `mouseReleased`, `blit`/`blitSprite`, `RenderPipelines.GUI_TEXTURED`, `ResourceKey.identifier()`,
-`Commands.hasPermission(Commands.LEVEL_GAMEMASTERS)`, `RandomizableContainerBlockEntity.getLootTable()`.
+`Commands.hasPermission(Commands.LEVEL_GAMEMASTERS)`, `RandomizableContainerBlockEntity.getLootTable()`,
+`CustomPacketPayload`(+`Type`), `StreamCodec.of`, `FriendlyByteBuf` read/write, `PermissionSet`/
+`PermissionCheck`, `PlayerList.getPlayer(UUID)`, `ServerPlayNetworking` and `ClientPlayNetworking`
+(`registerGlobalReceiver`/`send`/`canSend`), both `Context` types, `PacketSender.sendPacket`, and
+`ServerPlayConnectionEvents`/`ClientPlayConnectionEvents`.
+
+**Correction to an earlier note in this document:** the networking API is *not* wholly identical
+across the two targets. Everything above is, but Fabric API 6 renamed the `PayloadTypeRegistry`
+static accessors, so one shim is needed. `ServerPlayNetworking.createS2CPacket` and
+`ClientPlayNetworking.createC2SPacket` were also renamed to `createClientboundPacket` /
+`createServerboundPacket`; we do not use either.
 
 Note `ResourceLocation` is named **`Identifier`** on both.
 
@@ -159,48 +172,77 @@ return contents.stream();
   from the texture.
 - **Guidance**: action bar shows `item  bearing  distance`, driven by `HighlightTimer`.
 - **Commands**: `/chesttracker scanworld [cancel]`, `scan`, `stats`, `find` (op-gated).
+- **Multiplayer**: the screen queries a server running the mod, permission-gated, and falls back
+  cleanly on a vanilla server. See the Phase 7 section for what is and is not verified.
 - **Config screen** via Mod Menu (optional) and `config/chestindex.json`.
 - Keybind: `` ` `` — appears in vanilla Controls under Inventory as "Search containers".
 
 ---
 
-## In progress — Phase 7: multiplayer networking
+## Phase 7: multiplayer networking — done
 
-**This is the biggest remaining gap.** The GUI currently talks to the integrated server directly, so
-on a dedicated server it says "No index here yet". The release notes say singleplayer-only.
+The GUI now works on a dedicated server. Both routes to the index produce the same
+`core/net/QueryDto` shapes and run the same `server/QueryService`; the screen has one code path and
+cannot tell which end answered it.
 
-Done: `core/net/QueryDto.java` — `Filters`, `SummaryRequest`/`ItemSummary`/`SummaryResponse`,
-`ContainerRequest`/`ContainerHit`/`ContainerResponse`.
+```
+core/net/QueryDto      wire shapes: Filters, SummaryRequest/Response, ContainerRequest/Response,
+                       Hello. Requests carry a correlation id and no position
+server/QueryService    DTO in, DTO out. Used by BOTH the singleplayer path and the network handler
+net/ChestTrackerPayloads   CustomPacketPayload types + hand-written FriendlyByteBuf codecs
+net/ChestTrackerNetwork    type registration (common init, both sides) + server handlers + hello
+platform/NetworkCompat     the one version shim: PayloadTypeRegistry accessors
+client/net/ServerLink      connection state, correlation, timeouts, fallback
+```
 
-**Key design decision, already made and important:** the wire carries item and container ids as
-**registry strings, never palette ids**. Client and server palettes are independent, so the same int
-means different things on each side — sending ids would appear to work and silently mislabel
-everything.
+**Decisions that are load-bearing:**
 
-**Second decision:** singleplayer should produce the *same DTOs* rather than shortcutting to the
-index. One shape means the screen has a single code path and the singleplayer route cannot rot
-unnoticed. This implies refactoring `ChestTrackerScreen` off `WorldIndex.ItemSummary` /
-`SearchResult` and onto the DTOs.
+- **Registry strings on the wire, never palette ids.** The two sides' palettes are built
+  independently, so the same int means a different item on each. Sending ids would appear to work
+  and silently mislabel everything.
+- **Requests carry no position and no dimension.** The server already knows where the asking player
+  is, so sending them would add values the server must either trust or ignore — and a client that
+  could move the query centre could rank a search around somewhere it has never been.
+- **Correlation ids, not arrival order.** Every keystroke starts a query; on a connection with any
+  jitter an early reply lands after a later one. The screen accepts only ids newer than what it is
+  already showing.
+- **The server announces itself; the client does not ask.** An unknown custom payload is dropped
+  without a reply, so "no mod" and "not answered yet" are indistinguishable. The server sends
+  `Hello` on join, and the client falls back after `serverHelloTimeoutMs` (default 3s). Because the
+  client's channel list can still be in flight at join, *any* reply to a real query is also taken as
+  proof — the announcement is the normal route, not the only one.
+- **Permission tier `ALL` / `OWNED` / `OP`, config key `permissionTier`, default `OP`.** A full world
+  index is loot x-ray. `OWNED` is enforced by an owner filter *inside* `IndexQuery`, not by
+  filtering results afterwards — post-filtering would make the result limit count containers the
+  player may not see. A record whose owner was never observed does not match an owner-restricted
+  query; a tier that leaks on missing data is not a tier. Ops are not owner-restricted.
+- **The host is never gated.** Their screen calls `QueryService` directly on the integrated server
+  and never touches the network path. The tier applies to everyone arriving over a connection,
+  LAN guests included.
+- **Both sends are guarded by `canSend`.** Sending a peer a payload it never registered disconnects
+  it — for the hello, our own greeting would have been what kicked the player.
 
-Remaining:
-1. `server/QueryService` — takes a DTO request, returns a DTO response. Used by *both* the
-   singleplayer path and the network handler.
-2. Fabric `CustomPacketPayload` types + `PayloadTypeRegistry` registration. The networking API is
-   **identical on both versions** (verified), so no shim needed.
-3. Server handler with a permission gate. Design: config tier `ALL` / `OWNED` / `OP`, defaulting to
-   `OP` on dedicated servers — a full world index is effectively loot x-ray.
-4. A `hello` payload so the client knows whether the server has the mod; if none arrives within a
-   grace period, fall back.
-5. Rewire `ClientTracker` to use the network when not singleplayer.
+**Verified:** both targets build; 105 unit tests green on both (up from 88), including a codec
+round-trip per payload through a real `FriendlyByteBuf` and the owner-filter cases. Both dedicated
+servers start clean with registration and handlers installed, run a region scan and answer
+`/chesttracker stats` with no errors.
 
----
+**Not verified:** the actual client-to-server round trip in game. That needs a real client joining a
+real server, which cannot be driven headlessly here. Worth doing before release: join a dedicated
+server, confirm the grid populates, that a non-op sees the refusal message under the default `OP`
+tier, and that a vanilla server still falls back to "No index here yet." within the grace period.
 
 ## Not done
 
 - **In-world highlight box.** Guidance is action-bar only. Needs the world-render API probed on both
   versions — the most likely place the Vulkan rework bites. `WorldRenderEvents` exists in Fabric API
   for both but the context API was not compared.
-- **Vanilla-server fallback** (locations from loaded chunks + remember-on-open).
+- **Vanilla-server fallback** (locations from loaded chunks + remember-on-open). Phase 7 only made
+  the *detection* honest: the client now recognises a server without the mod and says "No index here
+  yet." instead of appearing broken. It still indexes nothing there. **Note the README's "Where it
+  works" section already claims this works** ("it maps where containers are, remembers what you've
+  seen inside") — that claim is not true yet, and either the feature or the sentence needs to move
+  before release.
 - **Paper plugin.** Designed in the plan, sequenced last. `core` is already game-free so it can be
   extracted as a Gradle module when that starts. Paper API: `1.21.11-R0.1-SNAPSHOT` and
   `26.2.build.121-stable`. Paper, not Spigot — Adventure matters because `/chesttracker find` is the

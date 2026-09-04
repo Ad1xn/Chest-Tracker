@@ -53,7 +53,19 @@ marks entries whose contents it can't know.
 ## Server operators
 
 A full world index is effectively loot x-ray, so on a dedicated server queries are **op-only by
-default**. Set `permissionTier` to `ALL` or `OWNED` in the config to widen access.
+default**. Set `permissionTier` in the config to widen access:
+
+| `permissionTier` | Who can search | What they see |
+|---|---|---|
+| `OP` (default) | operators only | everything |
+| `OWNED` | everyone | only containers they placed themselves (operators still see everything) |
+| `ALL` | everyone | everything |
+
+The tier applies to every player arriving over a connection, LAN guests included. A host playing
+their own world is never gated — their screen reads the world directly.
+
+Clients connecting to a server without the mod fall back automatically; no configuration is needed
+on either side.
 
 The server side is useful on its own — `/chesttracker find <item>` works from a vanilla client with
 no mod installed.
@@ -79,7 +91,9 @@ export JAVA_HOME=$(/usr/libexec/java_home -v 26)   # macOS; any JDK >= 25 works
 ```
 
 The per-target compile toolchain (21 for 1.21.11, 25 for 26.2) is provisioned by Gradle
-automatically. Our own bytecode is emitted at Java 21 on both targets.
+automatically, and each target emits bytecode at its own level. Compiling everything at 21 was
+tidier, but it leaves a target unable to consume a dependency built for 25 — Gradle's variant
+matching rejects it outright.
 
 ## Licence
 

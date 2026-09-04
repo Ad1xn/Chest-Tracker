@@ -1,202 +1,134 @@
 package dev.adrian.chesttracker.client;
 
-import dev.adrian.chesttracker.core.index.IndexQuery;
-import dev.adrian.chesttracker.core.index.SearchResult;
-import dev.adrian.chesttracker.core.index.WorldIndex;
-import dev.adrian.chesttracker.core.model.Origin;
-import dev.adrian.chesttracker.core.util.BlockKey;
+import dev.adrian.chesttracker.client.net.ServerLink;
+import dev.adrian.chesttracker.config.ChestTrackerConfig;
+import dev.adrian.chesttracker.core.net.QueryDto;
+import dev.adrian.chesttracker.server.QueryService;
 import dev.adrian.chesttracker.server.TrackerService;
 import dev.adrian.chesttracker.server.Trackers;
-import dev.adrian.chesttracker.server.scan.LiveScanner;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.client.server.IntegratedServer;
-import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
 
-import java.util.HashSet;
 import java.util.List;
-import java.util.Locale;
-import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 
 /**
- * The client's route to the index.
+ * The client's route to the index, whichever end it lives on.
  *
- * <p>In singleplayer the client <em>is</em> the server, so this talks to the
- * integrated server's {@link TrackerService} directly - which is why
- * singleplayer gets full contents with no networking at all. Queries are
- * submitted to the server thread rather than run inline: the index is not
- * thread-safe, and the render thread must never touch it.
+ * <p>Both routes produce the same {@link QueryDto} shapes, and both run the
+ * same {@link QueryService}. In singleplayer that service is called directly on
+ * the integrated server's thread; on a remote server the request goes over the
+ * wire and the far end calls it. The screen cannot tell the difference, which
+ * is the point: a singleplayer-only shortcut would be the code path nobody
+ * exercises while working on multiplayer, and the one that quietly breaks.
  *
- * <p>On a multiplayer server this returns nothing until the wire protocol
- * lands; that is the next phase, and the screen already treats results as
- * arriving asynchronously so it will not need reworking.
+ * <p>Queries are never run inline. The index is not thread-safe and the render
+ * thread must never touch it, so even the local path is submitted to the server
+ * thread and answered asynchronously.
  */
 public final class ClientTracker {
 
     private ClientTracker() {}
 
+    /** Why the screen can or cannot show anything. */
+    public enum Availability {
+        /** Our own world; full access, no networking. */
+        LOCAL,
+        /** A server with the mod, and permission to ask it. */
+        SERVER,
+        /** A server with the mod that will not answer this player. */
+        NOT_PERMITTED,
+        /** Still deciding - the server has not announced itself yet. */
+        CONNECTING,
+        /** No index reachable from here. */
+        NONE
+    }
+
+    public static Availability availability() {
+        if (hasLocalIndex()) return Availability.LOCAL;
+        return switch (ServerLink.state()) {
+            case WAITING -> Availability.CONNECTING;
+            case PRESENT -> ServerLink.canQuery() ? Availability.SERVER : Availability.NOT_PERMITTED;
+            case ABSENT -> Availability.NONE;
+        };
+    }
+
     /** True when there is an index we can query without networking. */
     public static boolean isAvailable() {
+        return availability() == Availability.LOCAL || availability() == Availability.SERVER;
+    }
+
+    private static boolean hasLocalIndex() {
         Minecraft client = Minecraft.getInstance();
         return client.hasSingleplayerServer() && client.getSingleplayerServer() != null;
     }
 
-    /**
-     * Searches asynchronously.
-     *
-     * @param query free text matched against item ids; blank matches everything
-     */
-    public static CompletableFuture<List<SearchResult>> search(String query, int limit) {
-        Minecraft client = Minecraft.getInstance();
-        IntegratedServer server = client.getSingleplayerServer();
-        LocalPlayer player = client.player;
-        if (server == null || player == null) return CompletableFuture.completedFuture(List.of());
+    // --- Queries ------------------------------------------------------------
 
-        String dimensionId = player.level().dimension().identifier().toString();
-        long centre = BlockKey.pack(player.getBlockX(), player.getBlockY(), player.getBlockZ());
-        String needle = query == null ? "" : query.trim().toLowerCase(Locale.ROOT);
+    /** Totals every indexed item, for the item-first grid. */
+    public static CompletableFuture<QueryDto.SummaryResponse> summarise(
+            String text, QueryDto.Filters filters, int limit) {
 
-        return server.submit(() -> {
-            TrackerService tracker = Trackers.current();
-            if (tracker == null) return List.<SearchResult>of();
+        int requestId = ServerLink.nextRequestId();
+        QueryDto.SummaryRequest request = new QueryDto.SummaryRequest(requestId, text, filters, limit);
 
-            IndexQuery.Builder builder = IndexQuery.builder().center(centre).limit(limit);
-            if (!needle.isEmpty()) {
-                Set<Integer> itemIds = matchingItemIds(tracker, needle);
-                if (itemIds.isEmpty()) return List.<SearchResult>of();
-                builder.items(itemIds);
-            }
-            IndexQuery indexQuery = builder.build();
+        if (!hasLocalIndex()) return ServerLink.summarise(request);
 
-            // Re-read anything currently loaded before showing it, so results are
-            // never stale for containers the game has in memory right now.
-            ServerLevel level = Trackers.levelFor(dimensionId);
-            if (level != null) {
-                LiveScanner refresher = new LiveScanner(tracker);
-                for (SearchResult candidate : tracker.search(dimensionId, indexQuery)) {
-                    refresher.refreshIfLoaded(level, dimensionId, candidate.container().pos());
-                }
-            }
-            return tracker.search(dimensionId, indexQuery);
-        });
-    }
-
-    /** Substring match over interned item ids, so "diamond" finds every variant. */
-    private static Set<Integer> matchingItemIds(TrackerService tracker, String needle) {
-        Set<Integer> matches = new HashSet<>();
-        List<String> entries = tracker.palette().entries();
-        for (int id = 0; id < entries.size(); id++) {
-            if (entries.get(id).toLowerCase(Locale.ROOT).contains(needle)) matches.add(id);
-        }
-        return matches;
-    }
-
-    /**
-     * What the toolbar buttons control.
-     *
-     * @param includeNested   count items inside shulker boxes
-     * @param includeMachines include hoppers, furnaces and the like
-     * @param origins         empty means every origin
-     */
-    public record Filters(boolean includeNested, boolean includeMachines, Set<Origin> origins) {
-        public static Filters defaults() {
-            return new Filters(true, false, Set.of());
-        }
-    }
-
-    /** Block entity types whose contents churn constantly and are rarely searched for. */
-    private static final Set<String> MACHINES = Set.of(
-            "minecraft:hopper", "minecraft:dropper", "minecraft:dispenser",
-            "minecraft:furnace", "minecraft:blast_furnace", "minecraft:smoker",
-            "minecraft:brewing_stand", "minecraft:crafter", "minecraft:campfire",
-            "minecraft:jukebox", "minecraft:lectern", "minecraft:decorated_pot",
-            "minecraft:chiseled_bookshelf");
-
-    private static Set<Integer> machineTypeIds(TrackerService tracker) {
-        Set<Integer> ids = new HashSet<>();
-        List<String> entries = tracker.palette().entries();
-        for (int id = 0; id < entries.size(); id++) {
-            if (MACHINES.contains(entries.get(id))) ids.add(id);
-        }
-        return ids;
-    }
-
-    private static void applyFilters(IndexQuery.Builder builder, Filters filters, TrackerService tracker) {
-        builder.includeNested(filters.includeNested());
-        if (!filters.origins().isEmpty()) builder.origins(filters.origins());
-        if (!filters.includeMachines()) builder.excludeTypes(machineTypeIds(tracker));
-    }
-
-    /** Totals every indexed item, for the item-first list. */
-    public static CompletableFuture<List<WorldIndex.ItemSummary>> summarise(
-            String query, Filters filters, int limit) {
-        Minecraft client = Minecraft.getInstance();
-        IntegratedServer server = client.getSingleplayerServer();
-        LocalPlayer player = client.player;
-        if (server == null || player == null) return CompletableFuture.completedFuture(List.of());
-
-        String dimensionId = player.level().dimension().identifier().toString();
-        long centre = BlockKey.pack(player.getBlockX(), player.getBlockY(), player.getBlockZ());
-        String needle = query == null ? "" : query.trim().toLowerCase(Locale.ROOT);
-
-        return server.submit(() -> {
-            TrackerService tracker = Trackers.current();
-            if (tracker == null) return List.<WorldIndex.ItemSummary>of();
-
-            IndexQuery.Builder builder = IndexQuery.builder().center(centre);
-            applyFilters(builder, filters, tracker);
-            if (!needle.isEmpty()) {
-                Set<Integer> itemIds = matchingItemIds(tracker, needle);
-                if (itemIds.isEmpty()) return List.<WorldIndex.ItemSummary>of();
-                builder.items(itemIds);
-            }
-
-            List<WorldIndex.ItemSummary> all = tracker.index(dimensionId).summarise(builder.build());
-            return all.size() > limit ? List.copyOf(all.subList(0, limit)) : all;
-        });
+        return onServerThread(
+                (tracker, player) -> QueryService.summarise(tracker, player, request, localAccess()),
+                new QueryDto.SummaryResponse(requestId, List.of()));
     }
 
     /** The containers holding one item, nearest first. */
-    public static CompletableFuture<List<SearchResult>> containersFor(int itemId, Filters filters, int limit) {
-        return search(itemId, filters, limit);
+    public static CompletableFuture<QueryDto.ContainerResponse> containers(
+            String itemId, QueryDto.Filters filters, int limit) {
+
+        int requestId = ServerLink.nextRequestId();
+        QueryDto.ContainerRequest request = new QueryDto.ContainerRequest(requestId, itemId, filters, limit);
+
+        if (!hasLocalIndex()) return ServerLink.containers(request);
+
+        return onServerThread(
+                (tracker, player) -> QueryService.containers(tracker, player, request, localAccess()),
+                new QueryDto.ContainerResponse(requestId, List.of()));
     }
 
-    private static CompletableFuture<List<SearchResult>> search(int itemId, Filters filters, int limit) {
+    /**
+     * Our own world is never gated.
+     *
+     * <p>The configured tier governs players arriving over the network. This
+     * path is only ever the host querying the world they are playing, and
+     * making them op themselves to search their own chests would be absurd.
+     */
+    private static ChestTrackerConfig.Access localAccess() {
+        return ChestTrackerConfig.Access.ALL;
+    }
+
+    private interface LocalQuery<T> {
+        T run(TrackerService tracker, ServerPlayer player);
+    }
+
+    /**
+     * Runs a query on the integrated server's thread.
+     *
+     * <p>It resolves the <em>server's</em> player rather than using the local
+     * one, so the query centre and dimension come from the same authoritative
+     * place they would on a real server.
+     */
+    private static <T> CompletableFuture<T> onServerThread(LocalQuery<T> query, T empty) {
         Minecraft client = Minecraft.getInstance();
         IntegratedServer server = client.getSingleplayerServer();
-        LocalPlayer player = client.player;
-        if (server == null || player == null) return CompletableFuture.completedFuture(List.of());
+        LocalPlayer local = client.player;
+        if (server == null || local == null) return CompletableFuture.completedFuture(empty);
 
-        String dimensionId = player.level().dimension().identifier().toString();
-        long centre = BlockKey.pack(player.getBlockX(), player.getBlockY(), player.getBlockZ());
-
+        java.util.UUID uuid = local.getUUID();
         return server.submit(() -> {
             TrackerService tracker = Trackers.current();
-            if (tracker == null) return List.<SearchResult>of();
-
-            IndexQuery.Builder builder = IndexQuery.builder().item(itemId).center(centre).limit(limit);
-            applyFilters(builder, filters, tracker);
-            IndexQuery query = builder.build();
-
-            // Re-read anything loaded before showing it, so the detail pane is
-            // never stale for containers the game has in memory right now.
-            ServerLevel level = Trackers.levelFor(dimensionId);
-            if (level != null) {
-                LiveScanner refresher = new LiveScanner(tracker);
-                for (SearchResult candidate : tracker.search(dimensionId, query)) {
-                    refresher.refreshIfLoaded(level, dimensionId, candidate.container().pos());
-                }
-            }
-            return tracker.search(dimensionId, query);
+            ServerPlayer player = server.getPlayerList().getPlayer(uuid);
+            if (tracker == null || player == null) return empty;
+            return query.run(tracker, player);
         });
-    }
-
-    /** Resolves a palette id back to a registry name, for display. */
-    public static String nameOf(int paletteId) {
-        TrackerService tracker = Trackers.current();
-        if (tracker == null) return "?";
-        String value = tracker.palette().value(paletteId);
-        return value == null ? "?" : value;
     }
 }

@@ -3,9 +3,7 @@ package dev.adrian.chesttracker.client.ui;
 import dev.adrian.chesttracker.client.ClientTracker;
 import dev.adrian.chesttracker.client.highlight.ContainerHighlight;
 import dev.adrian.chesttracker.client.platform.Gfx;
-import dev.adrian.chesttracker.core.index.SearchResult;
-import dev.adrian.chesttracker.core.index.WorldIndex;
-import dev.adrian.chesttracker.core.model.Origin;
+import dev.adrian.chesttracker.core.net.QueryDto;
 import dev.adrian.chesttracker.core.util.BlockKey;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.Screen;
@@ -21,7 +19,6 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 //? if >=26.1 {
 /*import net.minecraft.client.gui.GuiGraphicsExtractor;
@@ -84,7 +81,7 @@ public final class ChestTrackerScreen extends Screen {
     private static final int DETAIL_ROW = 11;
 
     /** Registry lookups are not free and slots redraw every frame. */
-    private static final Map<Integer, ItemStack> ICON_CACHE = new HashMap<>();
+    private static final Map<String, ItemStack> ICON_CACHE = new HashMap<>();
 
     private enum Sort {
         COUNT("Most"), NEAREST("Nearest"), NAME("A-Z");
@@ -99,12 +96,33 @@ public final class ChestTrackerScreen extends Screen {
     private EditBox search;
     private String pending = "";
 
-    private List<WorldIndex.ItemSummary> items = List.of();
-    private List<SearchResult> containers = List.of();
-    private int selectedItemId = -1;
+    private List<QueryDto.ItemSummary> items = List.of();
+    private List<QueryDto.ContainerHit> containers = List.of();
+    private String selectedItemId;
     private int scrollRow;
     private boolean draggingScrollbar;
-    private boolean unavailable;
+
+    private ClientTracker.Availability availability = ClientTracker.Availability.NONE;
+
+    /**
+     * Ids of the newest replies accepted, per view.
+     *
+     * <p>Every keystroke starts a query and replies need not come back in the
+     * order they were asked for. Ids only ever increase, so anything not newer
+     * than what is already shown is a straggler and is dropped.
+     */
+    private int newestItemsReply;
+    private int newestContainersReply;
+
+    /**
+     * Whether the detail pane is still waiting.
+     *
+     * <p>An empty list is a real answer - the filters excluded everything, or a
+     * remote query timed out - so it cannot be told apart from "not back yet"
+     * without saying so. Before this, both showed "Looking..." and one of them
+     * never stopped.
+     */
+    private boolean containersPending;
 
     private Sort sort = Sort.COUNT;
     private boolean includeNested = true;
@@ -140,56 +158,62 @@ public final class ChestTrackerScreen extends Screen {
         addRenderableWidget(search);
         setInitialFocus(search);
 
-        unavailable = !ClientTracker.isAvailable();
+        availability = ClientTracker.availability();
         refreshItems();
     }
 
     // --- data --------------------------------------------------------------
 
-    private ClientTracker.Filters filters() {
-        Set<Origin> origins = switch (originIndex) {
-            case 1 -> Set.of(Origin.PLAYER_PLACED);
-            case 2 -> Set.of(Origin.NATURAL);
-            default -> Set.of();
-        };
-        return new ClientTracker.Filters(includeNested, includeMachines, origins);
+    private QueryDto.Filters filters() {
+        return new QueryDto.Filters(includeNested, includeMachines, originIndex);
     }
 
     private void refreshItems() {
-        if (unavailable) return;
-        String requested = pending;
-        ClientTracker.summarise(requested, filters(), MAX_ITEMS).thenAccept(found ->
+        if (!canQuery()) return;
+        ClientTracker.summarise(pending, filters(), MAX_ITEMS).thenAccept(response ->
                 minecraft.execute(() -> {
                     // A slow earlier query must not overwrite a newer one's results.
-                    if (!requested.equals(pending)) return;
-                    items = sorted(found);
+                    if (response.requestId() <= newestItemsReply) return;
+                    newestItemsReply = response.requestId();
+                    items = sorted(response.items());
                     scrollRow = 0;
                     back();
                 }));
     }
 
-    private List<WorldIndex.ItemSummary> sorted(List<WorldIndex.ItemSummary> source) {
-        List<WorldIndex.ItemSummary> copy = new ArrayList<>(source);
+    private boolean canQuery() {
+        return availability == ClientTracker.Availability.LOCAL
+                || availability == ClientTracker.Availability.SERVER;
+    }
+
+    private List<QueryDto.ItemSummary> sorted(List<QueryDto.ItemSummary> source) {
+        List<QueryDto.ItemSummary> copy = new ArrayList<>(source);
         switch (sort) {
-            case NEAREST -> copy.sort(Comparator.comparingDouble(WorldIndex.ItemSummary::nearestDistSq));
+            case NEAREST -> copy.sort(Comparator.comparingDouble(QueryDto.ItemSummary::nearestDistSq));
             case NAME -> copy.sort(Comparator.comparing(entry -> displayName(entry.itemId())));
             case COUNT -> { /* summarise already returns most-plentiful first */ }
         }
         return copy;
     }
 
-    private void selectItem(int itemId) {
+    private void selectItem(String itemId) {
         selectedItemId = itemId;
         containers = List.of();
-        ClientTracker.containersFor(itemId, filters(), MAX_CONTAINERS).thenAccept(found ->
+        containersPending = true;
+        ClientTracker.containers(itemId, filters(), MAX_CONTAINERS).thenAccept(response ->
                 minecraft.execute(() -> {
-                    if (selectedItemId == itemId) containers = found;
+                    if (!itemId.equals(selectedItemId)) return;
+                    if (response.requestId() <= newestContainersReply) return;
+                    newestContainersReply = response.requestId();
+                    containers = response.hits();
+                    containersPending = false;
                 }));
     }
 
     private void back() {
-        selectedItemId = -1;
+        selectedItemId = null;
         containers = List.of();
+        containersPending = false;
     }
 
     // --- geometry ----------------------------------------------------------
@@ -231,12 +255,20 @@ public final class ChestTrackerScreen extends Screen {
         hoverLabel = null;
         drawButtons(gfx, mouseX, mouseY);
 
-        if (unavailable) {
-            gfx.text(font, Component.literal("No index here yet."), gridX(), gridY() + 4, TEXT_DARK);
+        // The server announces itself shortly after joining, so a screen opened
+        // during that window has to notice when the answer arrives.
+        ClientTracker.Availability now = ClientTracker.availability();
+        if (now != availability) {
+            availability = now;
+            refreshItems();
+        }
+
+        if (!canQuery()) {
+            gfx.text(font, Component.literal(unavailableMessage()), gridX(), gridY() + 4, TEXT_DARK);
             return;
         }
 
-        if (selectedItemId < 0) {
+        if (selectedItemId == null) {
             drawGrid(gfx, mouseX, mouseY);
             drawScrollbar(gfx);
         } else {
@@ -244,11 +276,27 @@ public final class ChestTrackerScreen extends Screen {
         }
 
         String title = hoverLabel != null ? hoverLabel
-                : selectedItemId >= 0 ? displayName(selectedItemId) : "Chest Tracker";
+                : selectedItemId != null ? displayName(selectedItemId) : "Chest Tracker";
         // The toolbar occupies the right of the title row, so the text is
         // clipped to what is left rather than running underneath it.
         int available = buttonX(0) - (panelX + 8) - 4;
         gfx.text(font, Component.literal(truncate(title, available)), panelX + 8, panelY + 6, TEXT_DARK);
+    }
+
+    /**
+     * Why there is nothing to show.
+     *
+     * <p>Worth distinguishing: a vanilla server, a server that will not answer
+     * this player, and a world that simply has not been scanned are three
+     * different problems, and one message for all of them sends people looking
+     * in the wrong place.
+     */
+    private String unavailableMessage() {
+        return switch (availability) {
+            case CONNECTING -> "Asking the server...";
+            case NOT_PERMITTED -> "This server does not allow searching.";
+            default -> "No index here yet.";
+        };
     }
 
     /**
@@ -344,7 +392,7 @@ public final class ChestTrackerScreen extends Screen {
 
                 int x = gridX() + col * SLOT;
                 int y = gridY() + row * SLOT;
-                WorldIndex.ItemSummary summary = items.get(index);
+                QueryDto.ItemSummary summary = items.get(index);
 
                 gfx.item(iconFor(summary.itemId()), x, y);
                 drawCount(gfx, summary.totalCount(), x, y);
@@ -353,7 +401,7 @@ public final class ChestTrackerScreen extends Screen {
         }
 
         if (hovered >= 0) {
-            WorldIndex.ItemSummary summary = items.get(hovered);
+            QueryDto.ItemSummary summary = items.get(hovered);
             hoverLabel = String.format("%s  %,d in %d",
                     displayName(summary.itemId()), summary.totalCount(), summary.containerCount());
         } else if (items.isEmpty()) {
@@ -450,45 +498,56 @@ public final class ChestTrackerScreen extends Screen {
         int bottom = gridY() + ROWS * SLOT;
 
         if (containers.isEmpty()) {
-            gfx.text(font, Component.literal("Looking..."), x, y, TEXT_DARK);
+            gfx.text(font, Component.literal(containersPending ? "Looking..." : "Nothing holds that."),
+                    x, y, TEXT_DARK);
             return;
         }
 
-        for (SearchResult result : containers) {
+        for (QueryDto.ContainerHit hit : containers) {
             if (y + DETAIL_ROW > bottom) break;
             boolean hovered = mouseX >= x && mouseX <= panelX + panelW - 10
                     && mouseY >= y && mouseY < y + DETAIL_ROW;
             if (hovered) gfx.fill(x - 1, y - 1, panelX + panelW - 10, y + DETAIL_ROW - 1, ROW_HOVER);
-            gfx.text(font, Component.literal(describe(result)), x, y, TEXT_DARK);
+            gfx.text(font, Component.literal(describe(hit)), x, y, TEXT_DARK);
             y += DETAIL_ROW;
         }
         hoverLabel = "Click to be guided  -  right-click to go back";
     }
 
-    private String describe(SearchResult result) {
+    private String describe(QueryDto.ContainerHit hit) {
         StringBuilder line = new StringBuilder();
-        line.append(result.matchedCount()).append("x ")
-                .append(shortName(ClientTracker.nameOf(result.container().typeId())))
-                .append("  ").append(BlockKey.toString(result.container().pos()))
-                .append(String.format("  %.0fm", result.distance()));
-        if (result.matches().stream().anyMatch(entry -> entry.isNested())) line.append(" *");
+        line.append(hit.matchedCount()).append("x ")
+                .append(shortName(hit.typeId()))
+                .append("  ").append(BlockKey.toString(hit.pos()))
+                .append(String.format("  %.0fm", Math.sqrt(hit.distanceSq())));
+        if (hit.nested()) line.append(" *");
+        // A container we have only ever seen from the outside must not read as
+        // one we have counted - "?" is honest, an unmarked row is not.
+        if (!hit.contentsKnown()) line.append(" ?");
         return line.toString();
     }
 
     // --- item display ------------------------------------------------------
 
-    private static ItemStack iconFor(int paletteId) {
-        return ICON_CACHE.computeIfAbsent(paletteId, id -> {
-            Identifier identifier = Identifier.tryParse(ClientTracker.nameOf(id));
+    private static ItemStack iconFor(String itemId) {
+        return ICON_CACHE.computeIfAbsent(itemId, id -> {
+            Identifier identifier = Identifier.tryParse(id);
             if (identifier == null) return ItemStack.EMPTY;
             Item item = BuiltInRegistries.ITEM.getValue(identifier);
             return item == null ? ItemStack.EMPTY : new ItemStack(item);
         });
     }
 
-    private static String displayName(int paletteId) {
-        ItemStack stack = iconFor(paletteId);
-        return stack.isEmpty() ? shortName(ClientTracker.nameOf(paletteId)) : stack.getHoverName().getString();
+    /**
+     * The item's translated name, falling back to its registry path.
+     *
+     * <p>A server may index an item this client does not have - a mod present
+     * only on the server - so the registry lookup genuinely can miss, and the
+     * row still has to say something useful.
+     */
+    private static String displayName(String itemId) {
+        ItemStack stack = iconFor(itemId);
+        return stack.isEmpty() ? shortName(itemId) : stack.getHoverName().getString();
     }
 
     /** Trims text to a pixel width, with an ellipsis when it does not fit. */
@@ -515,15 +574,15 @@ public final class ChestTrackerScreen extends Screen {
         int mouseY = (int) event.y();
 
         if (event.button() == 0 && clickButton(mouseX, mouseY)) return true;
-        if (unavailable) return super.mouseClicked(event, doubleClick);
+        if (!canQuery()) return super.mouseClicked(event, doubleClick);
 
-        if (event.button() == 1 && selectedItemId >= 0) {
+        if (event.button() == 1 && selectedItemId != null) {
             back();
             return true;
         }
 
         if (event.button() == 0) {
-            if (selectedItemId < 0) {
+            if (selectedItemId == null) {
                 if (mouseX >= scrollbarX() && mouseX < scrollbarX() + 12
                         && mouseY >= gridY() - 1 && mouseY < gridY() - 1 + ROWS * SLOT) {
                     draggingScrollbar = true;
@@ -602,8 +661,8 @@ public final class ChestTrackerScreen extends Screen {
         return super.mouseReleased(event);
     }
 
-    private void guideTo(SearchResult result) {
-        ContainerHighlight.get().select(result.container().pos(),
+    private void guideTo(QueryDto.ContainerHit hit) {
+        ContainerHighlight.get().select(hit.pos(),
                 minecraft.player.level().dimension().identifier().toString(),
                 displayName(selectedItemId));
         onClose();
@@ -611,7 +670,7 @@ public final class ChestTrackerScreen extends Screen {
 
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double deltaX, double deltaY) {
-        if (selectedItemId < 0) {
+        if (selectedItemId == null) {
             scrollRow = Math.max(0, Math.min(maxScrollRow(), scrollRow - (int) Math.signum(deltaY)));
         }
         return true;

@@ -22,6 +22,8 @@ versions/*/build/
 run/
 runs/
 versions/*/run/
+# Loom drops an empty latest.log beside the project when a dev server starts.
+versions/*/logs/
 
 # OS
 .DS_Store

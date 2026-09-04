@@ -1,5 +1,6 @@
 package dev.adrian.chesttracker;
 
+import dev.adrian.chesttracker.net.ChestTrackerNetwork;
 import dev.adrian.chesttracker.server.ChestTrackerCommands;
 import dev.adrian.chesttracker.server.TrackerService;
 import dev.adrian.chesttracker.server.Trackers;
@@ -29,6 +30,12 @@ public final class ChestTracker implements ModInitializer {
 
     @Override
     public void onInitialize() {
+        // Payload types must be registered identically on both sides, so this
+        // runs from the common entrypoint rather than the server one. The
+        // handlers below it are server-side and inert on a client.
+        ChestTrackerNetwork.registerTypes();
+        ChestTrackerNetwork.registerServerHandlers();
+
         ServerLifecycleEvents.SERVER_STARTED.register(server -> {
             // Singleplayer runs an integrated server, so this is also the path
             // that gives the client full access to its own world.
