@@ -33,7 +33,7 @@ import java.util.Set;
 public final class QueryService {
 
     /** Nothing the client asks for may exceed these, whatever it sends. */
-    private static final int MAX_ITEMS = 1000;
+    private static final int MAX_ITEMS = 2000;
     private static final int MAX_CONTAINERS = 128;
 
     /**
@@ -87,7 +87,7 @@ public final class QueryService {
             TrackerService tracker, ServerPlayer player,
             QueryDto.SummaryRequest request, ChestTrackerConfig.Access access) {
 
-        if (!mayQuery(player, access)) return new QueryDto.SummaryResponse(request.requestId(), List.of());
+        if (!mayQuery(player, access)) return QueryDto.SummaryResponse.refused(request.requestId());
 
         String dimensionId = Trackers.dimensionId(player.level());
         IndexQuery.Builder builder = IndexQuery.builder()
@@ -98,7 +98,7 @@ public final class QueryService {
         String needle = normalise(request.text());
         if (!needle.isEmpty()) {
             Set<Integer> itemIds = matchingItemIds(tracker, needle);
-            if (itemIds.isEmpty()) return new QueryDto.SummaryResponse(request.requestId(), List.of());
+            if (itemIds.isEmpty()) return QueryDto.SummaryResponse.of(request.requestId(), List.of());
             builder.items(itemIds);
         }
 
@@ -115,7 +115,7 @@ public final class QueryService {
             items.add(new QueryDto.ItemSummary(itemId, summary.totalCount(),
                     summary.containerCount(), summary.nearestDistSq()));
         }
-        return new QueryDto.SummaryResponse(request.requestId(), items);
+        return QueryDto.SummaryResponse.of(request.requestId(), items);
     }
 
     /** The containers holding one item, nearest first. */
@@ -124,11 +124,11 @@ public final class QueryService {
             QueryDto.ContainerRequest request, ChestTrackerConfig.Access access) {
 
         int id = request.requestId();
-        if (!mayQuery(player, access)) return new QueryDto.ContainerResponse(id, List.of());
+        if (!mayQuery(player, access)) return QueryDto.ContainerResponse.refused(id);
 
         int itemId = tracker.palette().lookup(request.itemId());
         // Never interned means nothing indexed has ever held it.
-        if (itemId < 0) return new QueryDto.ContainerResponse(id, List.of());
+        if (itemId < 0) return QueryDto.ContainerResponse.of(id, List.of());
 
         String dimensionId = Trackers.dimensionId(player.level());
         IndexQuery.Builder builder = IndexQuery.builder()
@@ -160,7 +160,7 @@ public final class QueryService {
                     result.container().origin() == Origin.NATURAL,
                     result.container().contentsKnown()));
         }
-        return new QueryDto.ContainerResponse(id, hits);
+        return QueryDto.ContainerResponse.of(id, hits);
     }
 
     // --- Helpers ------------------------------------------------------------

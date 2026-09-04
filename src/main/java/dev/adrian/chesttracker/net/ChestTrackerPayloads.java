@@ -106,6 +106,7 @@ public final class ChestTrackerPayloads {
                         (buf, payload) -> {
                             QueryDto.SummaryResponse response = payload.response();
                             buf.writeVarInt(response.requestId());
+                            buf.writeBoolean(response.permitted());
                             buf.writeVarInt(response.items().size());
                             for (QueryDto.ItemSummary item : response.items()) {
                                 buf.writeUtf(item.itemId(), MAX_ID);
@@ -116,7 +117,8 @@ public final class ChestTrackerPayloads {
                         },
                         buf -> {
                             int requestId = buf.readVarInt();
-                            return new SummaryResponsePayload(new QueryDto.SummaryResponse(requestId,
+                            boolean permitted = buf.readBoolean();
+                            return new SummaryResponsePayload(new QueryDto.SummaryResponse(requestId, permitted,
                                     readList(buf, b -> new QueryDto.ItemSummary(
                                             b.readUtf(MAX_ID), b.readVarInt(), b.readVarInt(), b.readDouble()))));
                         });
@@ -162,6 +164,7 @@ public final class ChestTrackerPayloads {
                         (buf, payload) -> {
                             QueryDto.ContainerResponse response = payload.response();
                             buf.writeVarInt(response.requestId());
+                            buf.writeBoolean(response.permitted());
                             buf.writeVarInt(response.hits().size());
                             for (QueryDto.ContainerHit hit : response.hits()) {
                                 buf.writeUtf(hit.typeId(), MAX_ID);
@@ -175,7 +178,8 @@ public final class ChestTrackerPayloads {
                         },
                         buf -> {
                             int requestId = buf.readVarInt();
-                            return new ContainerResponsePayload(new QueryDto.ContainerResponse(requestId,
+                            boolean permitted = buf.readBoolean();
+                            return new ContainerResponsePayload(new QueryDto.ContainerResponse(requestId, permitted,
                                     readList(buf, b -> new QueryDto.ContainerHit(
                                             b.readUtf(MAX_ID), b.readLong(), b.readVarInt(), b.readDouble(),
                                             b.readBoolean(), b.readBoolean(), b.readBoolean()))));

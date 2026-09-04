@@ -44,7 +44,7 @@ class PayloadCodecTest {
 
     @Test
     void summaryResponseSurvivesTheRoundTrip() {
-        QueryDto.SummaryResponse original = new QueryDto.SummaryResponse(7, List.of(
+        QueryDto.SummaryResponse original = QueryDto.SummaryResponse.of(7, List.of(
                 new QueryDto.ItemSummary("minecraft:redstone", 2304, 4, 18.5),
                 new QueryDto.ItemSummary("minecraft:diamond", 12, 1, 400.0)));
 
@@ -75,7 +75,7 @@ class PayloadCodecTest {
     void containerResponseKeepsEveryFlagDistinct() {
         // Three booleans in a row is exactly where a transposed field goes
         // unnoticed, so they are given three different values.
-        QueryDto.ContainerResponse original = new QueryDto.ContainerResponse(9, List.of(
+        QueryDto.ContainerResponse original = QueryDto.ContainerResponse.of(9, List.of(
                 new QueryDto.ContainerHit("minecraft:chest", -1234567890123L, 64, 91.25, true, false, true),
                 new QueryDto.ContainerHit("minecraft:barrel", 42L, 1, 0.0, false, true, false)));
 
@@ -105,7 +105,7 @@ class PayloadCodecTest {
     void emptyResponsesRoundTrip() {
         FriendlyByteBuf buf = buffer();
         ChestTrackerPayloads.SummaryResponsePayload.CODEC.encode(buf,
-                new ChestTrackerPayloads.SummaryResponsePayload(new QueryDto.SummaryResponse(1, List.of())));
+                new ChestTrackerPayloads.SummaryResponsePayload(QueryDto.SummaryResponse.of(1, List.of())));
 
         assertTrue(ChestTrackerPayloads.SummaryResponsePayload.CODEC.decode(buf).response().items().isEmpty());
         assertEquals(0, buf.readableBytes());
@@ -136,12 +136,28 @@ class PayloadCodecTest {
     }
 
     @Test
+    void aRefusalSurvivesTheRoundTrip() {
+        // The flag rides on every reply, so opping someone mid-session takes
+        // effect on their next query rather than on their next login.
+        FriendlyByteBuf buf = buffer();
+        ChestTrackerPayloads.SummaryResponsePayload.CODEC.encode(buf,
+                new ChestTrackerPayloads.SummaryResponsePayload(QueryDto.SummaryResponse.refused(4)));
+        QueryDto.SummaryResponse decoded =
+                ChestTrackerPayloads.SummaryResponsePayload.CODEC.decode(buf).response();
+
+        assertFalse(decoded.permitted());
+        assertEquals(4, decoded.requestId());
+        assertEquals(0, buf.readableBytes());
+    }
+
+    @Test
     void anImplausibleEntryCountIsRefusedRatherThanAllocatedFor() {
         // A hostile or corrupt packet can declare any length it likes. The read
         // must refuse before it reserves room for it, or one small packet asks
         // the other side for an arbitrarily large allocation.
         FriendlyByteBuf buf = buffer();
         buf.writeVarInt(1);              // request id
+        buf.writeBoolean(true);          // permitted
         buf.writeVarInt(Integer.MAX_VALUE); // claimed entry count
 
         assertThrows(IllegalArgumentException.class,

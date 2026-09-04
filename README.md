@@ -52,14 +52,18 @@ marks entries whose contents it can't know.
 
 ## Server operators
 
-A full world index is effectively loot x-ray, so on a dedicated server queries are **op-only by
-default**. Set `permissionTier` in the config to widen access:
+By default **everyone on the server can search** — installing the mod is the decision that players
+should be able to. Narrow it with `/chesttracker access <tier>` (takes effect immediately, no
+restart) or the `permissionTier` config key:
 
 | `permissionTier` | Who can search | What they see |
 |---|---|---|
-| `OP` (default) | operators only | everything |
+| `ALL` (default) | everyone | everything |
 | `OWNED` | everyone | only containers they placed themselves (operators still see everything) |
-| `ALL` | everyone | everything |
+| `OP` | operators only | everything |
+
+Worth knowing when choosing: a full index is effectively loot x-ray — it shows where every unopened
+generated chest is, and what is in other people's bases.
 
 The tier applies to every player arriving over a connection, LAN guests included. A host playing
 their own world is never gated — their screen reads the world directly.

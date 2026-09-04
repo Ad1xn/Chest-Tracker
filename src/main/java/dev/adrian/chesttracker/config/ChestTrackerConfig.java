@@ -38,12 +38,33 @@ public final class ChestTrackerConfig {
      */
     public boolean scanOnWorldJoin = true;
 
-    /** Index the contents of machines, not just their positions. */
-    public boolean indexMachineContents = false;
+    /**
+     * Whether the search screen starts with hoppers, furnaces and the like
+     * shown.
+     *
+     * <p>Machines are always indexed; this is only the filter's starting
+     * position. They are hidden by default because their contents churn
+     * constantly and are rarely what someone is looking for - but a hopper you
+     * just tipped five stacks into is exactly the case where that surprises
+     * people, so it is one click away in the menu.
+     *
+     * <p>Replaces an earlier {@code indexMachineContents} key that nothing ever
+     * read; an old config file simply falls back to this default.
+     */
+    public boolean showMachines = false;
 
     // --- Search -----------------------------------------------------------
 
-    public int maxResults = 300;
+    /** Distinct items the grid will show. {@link #UNLIMITED_RESULTS} means no cap. */
+    public int maxResults = 900;
+
+    /** The value {@link #maxResults} takes to mean "no limit". */
+    public static final int UNLIMITED_RESULTS = 0;
+
+    /** {@link #maxResults} as a query limit, where zero already means unlimited. */
+    public int resultLimit() {
+        return Math.max(0, maxResults);
+    }
 
     /** Whether items inside shulker boxes count as being in the outer container. */
     public boolean includeNested = true;
@@ -64,30 +85,35 @@ public final class ChestTrackerConfig {
         /** Operators only. */
         OP;
 
-        /** Unknown text means OP: an unreadable setting must not open the index. */
+        /** Unknown text means the default rather than throwing on a typo. */
         public static Access parse(String value) {
-            if (value == null) return OP;
+            if (value == null) return ALL;
             for (Access access : values()) {
                 if (access.name().equalsIgnoreCase(value.trim())) return access;
             }
-            return OP;
+            return ALL;
         }
     }
 
     /**
      * Who may query this copy of the mod over the network.
      *
-     * <p>Defaults to {@code OP} because a full world index is effectively loot
-     * x-ray: on a shared server it tells anyone where every unopened generated
-     * chest is, and what is in everybody else's base. Opening that up has to be
-     * the server owner's deliberate choice, so the default is the closed one.
+     * <p>Defaults to {@code ALL}: installing the mod on a server is the act of
+     * deciding players should be able to search, and a default nobody can use
+     * reads as broken rather than as safe. A server that wants it narrower has
+     * {@code OWNED} and {@code OP}, settable live with
+     * {@code /chesttracker access}.
+     *
+     * <p>Worth knowing when choosing: a full index is effectively loot x-ray -
+     * it shows where every unopened generated chest is, and what is in other
+     * people's bases.
      *
      * <p>Applies to every player who arrives over a connection, which includes
-     * guests in a world opened to LAN - a LAN host wanting to share the index
-     * sets this to {@code ALL}. The host themselves is never gated: their
-     * screen reads the integrated server directly and never goes near this.
+     * guests in a world opened to LAN. The host themselves is never gated:
+     * their screen reads the integrated server directly and never goes near
+     * this, which is why it does nothing in plain singleplayer.
      */
-    public String permissionTier = Access.OP.name();
+    public String permissionTier = Access.ALL.name();
 
     public Access permissionTier() {
         return Access.parse(permissionTier);

@@ -190,6 +190,22 @@ public final class ChestTrackerNetwork {
     }
 
     /**
+     * Re-greets everyone after the tier changes.
+     *
+     * <p>A greeting is otherwise only sent at join, so without this a player
+     * already connected keeps the permission they were told about then. Their
+     * next query would correct it, but a screen sitting open makes no queries.
+     */
+    public static void announceAccess(MinecraftServer server) {
+        if (server == null || Trackers.current() == null) return;
+        ChestTrackerConfig.Access tier = access();
+        for (ServerPlayer player : server.getPlayerList().getPlayers()) {
+            send(player, new ChestTrackerPayloads.HelloPayload(new QueryDto.Hello(
+                    QueryDto.Hello.PROTOCOL_VERSION, QueryService.mayQuery(player, tier))));
+        }
+    }
+
+    /**
      * Forgets everyone, on shutdown.
      *
      * <p>A client leaving a singleplayer world and opening another keeps the

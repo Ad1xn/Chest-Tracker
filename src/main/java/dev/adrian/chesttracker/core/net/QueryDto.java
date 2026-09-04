@@ -73,9 +73,25 @@ public final class QueryDto {
      */
     public record ItemSummary(String itemId, int totalCount, int containerCount, double nearestDistSq) {}
 
-    public record SummaryResponse(int requestId, List<ItemSummary> items) {
+    /**
+     * @param permitted whether the server answered this at all. Carried on
+     *                  every reply, not just the greeting: permission can
+     *                  change while a player is connected - being opped is the
+     *                  obvious case - and a greeting sent once at join would
+     *                  leave the client believing the old answer until it
+     *                  reconnected.
+     */
+    public record SummaryResponse(int requestId, boolean permitted, List<ItemSummary> items) {
         public SummaryResponse {
             items = items == null ? List.of() : List.copyOf(items);
+        }
+
+        public static SummaryResponse refused(int requestId) {
+            return new SummaryResponse(requestId, false, List.of());
+        }
+
+        public static SummaryResponse of(int requestId, List<ItemSummary> items) {
+            return new SummaryResponse(requestId, true, items);
         }
     }
 
@@ -91,9 +107,18 @@ public final class QueryDto {
     public record ContainerHit(String typeId, long pos, int matchedCount, double distanceSq,
                                boolean nested, boolean natural, boolean contentsKnown) {}
 
-    public record ContainerResponse(int requestId, List<ContainerHit> hits) {
+    /** @param permitted see {@link SummaryResponse#permitted()} */
+    public record ContainerResponse(int requestId, boolean permitted, List<ContainerHit> hits) {
         public ContainerResponse {
             hits = hits == null ? List.of() : List.copyOf(hits);
+        }
+
+        public static ContainerResponse refused(int requestId) {
+            return new ContainerResponse(requestId, false, List.of());
+        }
+
+        public static ContainerResponse of(int requestId, List<ContainerHit> hits) {
+            return new ContainerResponse(requestId, true, hits);
         }
     }
 
@@ -105,13 +130,14 @@ public final class QueryDto {
      * query is indistinguishable from a slow one. Announcing instead means the
      * client waits a short grace period and then knows.
      *
-     * @param canQuery whether this player's permission tier allows any query at
-     *                 all, so the screen can say "not allowed here" rather than
-     *                 showing an empty index
+     * @param canQuery whether this player's tier allows a query right now. Only
+     *                 an opening position - permission can change mid-session,
+     *                 so every reply carries it too and the client believes the
+     *                 most recent one
      */
     public record Hello(int protocolVersion, boolean canQuery) {
 
         /** Bumped when the payload shapes change incompatibly. */
-        public static final int PROTOCOL_VERSION = 1;
+        public static final int PROTOCOL_VERSION = 2;
     }
 }

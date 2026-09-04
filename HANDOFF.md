@@ -16,7 +16,7 @@ containers after you physically open them.
 - Local: `/Users/adrian/chesttracker`
 - Targets: **MC 1.21.11 and 26.2**, Fabric, both first-class
 - Released: `v0.1.0`, with a GitHub Actions release workflow on `v*` tags
-- 123 unit tests, green on both targets
+- 125 unit tests, green on both targets
 
 ### The constraint that shapes everything
 
@@ -195,6 +195,17 @@ platform/NetworkCompat     the one version shim: PayloadTypeRegistry accessors
 client/net/ServerLink      connection state, correlation, timeouts, fallback
 ```
 
+### Permission is restated on every reply
+
+`Hello` carries `canQuery`, but it is only an opening position. **Permission can change while a
+player is connected** - being opped is the obvious case - so every `SummaryResponse` and
+`ContainerResponse` carries a `permitted` flag, and the client believes the most recent one.
+
+This was a real bug: the greeting was sent once at join and cached, so opping a player did nothing
+until they reconnected. Worse, the screen then refused to *ask*, because of the stale answer it was
+trying to replace. The screen therefore keeps querying while refused - `mayAttempt()` is
+deliberately wider than `canQuery()` - slowly, and self-corrects. Protocol version is now **2**.
+
 ### Live updates
 
 The screen refreshes itself while open, in every environment.
@@ -244,8 +255,11 @@ index.
   `Hello` on join, and the client falls back after `serverHelloTimeoutMs` (default 3s). Because the
   client's channel list can still be in flight at join, *any* reply to a real query is also taken as
   proof — the announcement is the normal route, not the only one.
-- **Permission tier `ALL` / `OWNED` / `OP`, config key `permissionTier`, default `OP`.** A full world
-  index is loot x-ray. `OWNED` is enforced by an owner filter *inside* `IndexQuery`, not by
+- **Permission tier `ALL` / `OWNED` / `OP`, config key `permissionTier`, default `ALL`.** It was
+  `OP`, on the grounds that a full world index is loot x-ray. Changed on the owner's call: a server
+  where nobody may search reads as broken rather than as safe, and installing the mod is itself the
+  decision that players should be able to search. `/chesttracker access <tier>` sets it live and
+  re-greets everyone, so tightening it needs no restart. The rest of the reasoning still holds: `OWNED` is enforced by an owner filter *inside* `IndexQuery`, not by
   filtering results afterwards — post-filtering would make the result limit count containers the
   player may not see. A record whose owner was never observed does not match an owner-restricted
   query; a tier that leaks on missing data is not a tier. Ops are not owner-restricted.
@@ -265,10 +279,25 @@ screen re-queries on its floor (400 ms). A summary query walks the whole dimensi
 very large world that is real work on the server thread for as long as the screen stays open during
 a scan. Not measured on a large world yet.
 
+**Settings are now all real.** An audit found four of eight options were read by nothing:
+`indexMachineContents`, `maxResults`, `highlightSeconds` and `highlightRecedingGraceSeconds`. The
+highlight pair were dead because `ContainerHighlight` built one `HighlightTimer.defaults()` at
+class-init and never consulted the config; `maxResults` because the screen used a hardcoded
+constant; `indexMachineContents` was a second, unimplemented spelling of the machines *query*
+filter, and is now `showMachines`, seeding that filter's starting position. **If you add a setting,
+grep for a real read of it before believing it works.**
+
+**The toolbar is a menu now.** Four single-letter cycling buttons (S/O/N/M) told the player neither
+what they did nor what state they were in. Machines are hidden by default, so "I tipped five stacks
+into a hopper and only saw what reached the chest" was undiscoverable - the hopper's contents were
+indexed the whole time, just filtered out of the results. The burger menu lists each filter with its
+current value.
+
 **Not verified:** the actual client-to-server round trip in game. That needs a real client joining a
 real server, which cannot be driven headlessly here. Worth doing before release: join a dedicated
-server, confirm the grid populates, that a non-op sees the refusal message under the default `OP`
-tier, and that a vanilla server still falls back to "No index here yet." within the grace period.
+server, confirm the grid populates, that `/chesttracker access OP` then makes a non-op see the
+refusal message and that opping them clears it *without reconnecting*, and that a vanilla server
+still falls back to "No index here yet." within the grace period.
 
 ## Not done
 

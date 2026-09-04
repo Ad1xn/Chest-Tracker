@@ -110,7 +110,7 @@ public final class ClientTracker {
 
         return onServerThread(
                 (tracker, player) -> QueryService.summarise(tracker, player, request, localAccess()),
-                new QueryDto.SummaryResponse(requestId, List.of()));
+                QueryDto.SummaryResponse.of(requestId, List.of()));
     }
 
     /** The containers holding one item, nearest first. */
@@ -124,7 +124,7 @@ public final class ClientTracker {
 
         return onServerThread(
                 (tracker, player) -> QueryService.containers(tracker, player, request, localAccess()),
-                new QueryDto.ContainerResponse(requestId, List.of()));
+                QueryDto.ContainerResponse.of(requestId, List.of()));
     }
 
     /**

@@ -27,3 +27,4 @@ versions/*/logs/
 
 # OS
 .DS_Store
+.claude/worktrees/

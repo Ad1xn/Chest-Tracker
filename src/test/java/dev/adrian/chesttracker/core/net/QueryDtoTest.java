@@ -35,6 +35,17 @@ class QueryDtoTest {
     }
 
     @Test
+    void refusalAndAnswerAreDistinguishable() {
+        // An empty answer and a refusal look the same in the list, so the flag
+        // is the only thing that tells the screen which message to show - and
+        // it is what lets a mid-session op take effect without reconnecting.
+        assertFalse(QueryDto.SummaryResponse.refused(1).permitted());
+        assertTrue(QueryDto.SummaryResponse.of(1, List.of()).permitted());
+        assertFalse(QueryDto.ContainerResponse.refused(1).permitted());
+        assertTrue(QueryDto.ContainerResponse.of(1, List.of()).permitted());
+    }
+
+    @Test
     void defaultsCountNestedItemsAndHideMachines() {
         QueryDto.Filters defaults = QueryDto.Filters.defaults();
         assertTrue(defaults.includeNested());
@@ -46,13 +57,13 @@ class QueryDtoTest {
     void responsesCopyTheirListsAndTolerateNull() {
         List<QueryDto.ItemSummary> source = new java.util.ArrayList<>();
         source.add(new QueryDto.ItemSummary("minecraft:redstone", 64, 1, 4.0));
-        QueryDto.SummaryResponse response = new QueryDto.SummaryResponse(7, source);
+        QueryDto.SummaryResponse response = QueryDto.SummaryResponse.of(7, source);
 
         source.clear();
         assertEquals(1, response.items().size(), "response must not alias the caller's list");
         assertEquals(7, response.requestId());
 
-        assertTrue(new QueryDto.SummaryResponse(1, null).items().isEmpty());
-        assertTrue(new QueryDto.ContainerResponse(1, null).hits().isEmpty());
+        assertTrue(QueryDto.SummaryResponse.of(1, null).items().isEmpty());
+        assertTrue(QueryDto.ContainerResponse.of(1, null).hits().isEmpty());
     }
 }

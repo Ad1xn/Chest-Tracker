@@ -3,10 +3,12 @@ package dev.adrian.chesttracker.server;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
+import dev.adrian.chesttracker.config.ChestTrackerConfig;
 import dev.adrian.chesttracker.core.index.IndexQuery;
 import dev.adrian.chesttracker.core.index.SearchResult;
 import dev.adrian.chesttracker.core.index.WorldIndex;
 import dev.adrian.chesttracker.core.util.BlockKey;
+import dev.adrian.chesttracker.net.ChestTrackerNetwork;
 import dev.adrian.chesttracker.server.scan.LiveScanner;
 import dev.adrian.chesttracker.server.scan.RegionScanner;
 import net.minecraft.commands.CommandSourceStack;
@@ -47,12 +49,70 @@ public final class ChestTrackerCommands {
                         .executes(ctx -> scanWorld(ctx.getSource()))
                         .then(Commands.literal("cancel")
                                 .executes(ctx -> cancelScan(ctx.getSource()))))
+                .then(Commands.literal("access")
+                        .executes(ctx -> showAccess(ctx.getSource()))
+                        .then(Commands.argument("tier", StringArgumentType.word())
+                                .suggests((ctx, builder) -> {
+                                    for (ChestTrackerConfig.Access tier : ChestTrackerConfig.Access.values()) {
+                                        builder.suggest(tier.name());
+                                    }
+                                    return builder.buildFuture();
+                                })
+                                .executes(ctx -> setAccess(ctx.getSource(),
+                                        StringArgumentType.getString(ctx, "tier")))))
                 .then(Commands.literal("stats")
                         .executes(ctx -> stats(ctx.getSource())))
                 .then(Commands.literal("find")
                         .then(Commands.argument("item", StringArgumentType.greedyString())
                                 .executes(ctx -> find(ctx.getSource(),
                                         StringArgumentType.getString(ctx, "item"))))));
+    }
+
+    private static int showAccess(CommandSourceStack source) {
+        ChestTrackerConfig.Access tier = ChestTrackerConfig.get().permissionTier();
+        source.sendSuccess(() -> Component.literal(
+                "Players served: " + describe(tier) + " (" + tier.name() + ")"), false);
+        return 1;
+    }
+
+    /**
+     * Sets the tier live.
+     *
+     * <p>Exists because the alternative is stopping the server to edit a JSON
+     * file - and because a tier that cannot be changed from in-game is one
+     * nobody discovers is wrong until players complain.
+     */
+    private static int setAccess(CommandSourceStack source, String requested) {
+        ChestTrackerConfig config = ChestTrackerConfig.get();
+        ChestTrackerConfig.Access tier = ChestTrackerConfig.Access.parse(requested);
+
+        // parse() falls back rather than failing, which is right for a config
+        // file and wrong for a command: someone typing a tier deserves to know
+        // it was not the one they named.
+        if (!tier.name().equalsIgnoreCase(requested.trim())) {
+            source.sendFailure(Component.literal(
+                    "Unknown tier \"" + requested + "\". Use ALL, OWNED or OP."));
+            return 0;
+        }
+
+        config.permissionTier = tier.name();
+        config.save();
+
+        // Anyone with the screen open is told at once, rather than finding out
+        // the next time they happen to reopen it.
+        ChestTrackerNetwork.announceAccess(source.getServer());
+
+        source.sendSuccess(() -> Component.literal(
+                "Players served: " + describe(tier) + " (" + tier.name() + ")"), true);
+        return 1;
+    }
+
+    private static String describe(ChestTrackerConfig.Access tier) {
+        return switch (tier) {
+            case ALL -> "everyone";
+            case OWNED -> "their own containers";
+            case OP -> "operators only";
+        };
     }
 
     private static int scan(CommandSourceStack source, int chunkRadius) throws com.mojang.brigadier.exceptions.CommandSyntaxException {

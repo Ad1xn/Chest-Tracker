@@ -91,11 +91,19 @@ public final class ServerLink {
 
         ClientPlayNetworking.registerGlobalReceiver(
                 ChestTrackerPayloads.SummaryResponsePayload.TYPE,
-                (payload, context) -> deliver(payload.response().requestId(), payload.response()));
+                (payload, context) -> {
+                    // Every reply restates whether we are allowed. Being opped
+                    // mid-session has to take effect without reconnecting.
+                    canQuery = payload.response().permitted();
+                    deliver(payload.response().requestId(), payload.response());
+                });
 
         ClientPlayNetworking.registerGlobalReceiver(
                 ChestTrackerPayloads.ContainerResponsePayload.TYPE,
-                (payload, context) -> deliver(payload.response().requestId(), payload.response()));
+                (payload, context) -> {
+                    canQuery = payload.response().permitted();
+                    deliver(payload.response().requestId(), payload.response());
+                });
 
         ClientPlayNetworking.registerGlobalReceiver(
                 ChestTrackerPayloads.IndexChangedPayload.TYPE,
@@ -181,13 +189,15 @@ public final class ServerLink {
     public static CompletableFuture<QueryDto.SummaryResponse> summarise(QueryDto.SummaryRequest request) {
         return send(request.requestId(), QueryDto.SummaryResponse.class,
                 new ChestTrackerPayloads.SummaryRequestPayload(request),
-                new QueryDto.SummaryResponse(request.requestId(), List.of()));
+                // A reply that never arrives must not read as a refusal - the
+                // server may simply be gone, which is a different message.
+                QueryDto.SummaryResponse.of(request.requestId(), List.of()));
     }
 
     public static CompletableFuture<QueryDto.ContainerResponse> containers(QueryDto.ContainerRequest request) {
         return send(request.requestId(), QueryDto.ContainerResponse.class,
                 new ChestTrackerPayloads.ContainerRequestPayload(request),
-                new QueryDto.ContainerResponse(request.requestId(), List.of()));
+                QueryDto.ContainerResponse.of(request.requestId(), List.of()));
     }
 
     /**
@@ -213,11 +223,9 @@ public final class ServerLink {
 
     private static void deliver(int requestId, Object response) {
         // A reply of any kind proves the server has the mod, even if the
-        // announcement was missed because our channel list arrived late.
-        if (state == State.WAITING) {
-            state = State.PRESENT;
-            canQuery = true;
-        }
+        // announcement was missed because our channel list arrived late. What
+        // it says about permission has already been applied by the caller.
+        if (state == State.WAITING) state = State.PRESENT;
 
         Pending<?> pending = PENDING.get(requestId);
         // No entry means it already timed out, or the reply is for a request
