@@ -1,4 +1,5 @@
 {
   "key.chestindex.search": "Search containers",
+  "key.chestindex.search_hovered": "Find hovered item",
   "category.chestindex": "ChestTracker"
 }

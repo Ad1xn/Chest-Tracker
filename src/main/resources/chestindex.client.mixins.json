@@ -1,0 +1,12 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "dev.adrian.chesttracker.mixin.client",
+  "compatibilityLevel": "${mixin_compat}",
+  "client": [
+    "ContainerScreenAccessor"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

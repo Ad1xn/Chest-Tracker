@@ -9,12 +9,24 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.network.chat.Component;
 
+import java.util.List;
+
 /**
- * The container the player is currently being guided to.
+ * The containers the player is currently being guided to.
  *
- * <p>Selecting a result closes the screen and starts a highlight. It persists
- * while the player is making progress towards it and fades shortly after they
- * give up - see {@link HighlightTimer}, where that rule lives and is tested.
+ * <p>A selection is a <em>set</em> of positions, not one. Picking a row in the
+ * search screen names a single container, but the in-container hotkey means
+ * "where is this stuff", and the answer is every container holding it.
+ *
+ * <p>Guidance still names one at a time - an action bar has room for one
+ * bearing - so it points at whichever of them is nearest, re-chosen as the
+ * player moves. The rest are kept rather than discarded because they are what
+ * an in-world highlight will draw: see {@link #targets()}, which exists for
+ * exactly that and is why this class holds a list at all today.
+ *
+ * <p>The highlight persists while the player is making progress and fades
+ * shortly after they give up - see {@link HighlightTimer}, where that rule
+ * lives and is tested.
  */
 public final class ContainerHighlight {
 
@@ -36,7 +48,9 @@ public final class ContainerHighlight {
      */
     private HighlightTimer timer = HighlightTimer.defaults();
 
-    private long pos;
+    /** Packed positions, all in {@link #dimensionId}. Empty when inactive. */
+    private List<Long> targets = List.of();
+
     private String dimensionId;
     private String label;
 
@@ -46,29 +60,67 @@ public final class ContainerHighlight {
         return INSTANCE;
     }
 
+    /** Guides to one container - the search screen's "I want that one". */
     public void select(long pos, String dimensionId, String label) {
+        select(List.of(pos), dimensionId, label);
+    }
+
+    /**
+     * Guides to the nearest of several, and remembers them all.
+     *
+     * <p>An empty list clears rather than leaving a highlight with nothing to
+     * point at, which would otherwise sit on screen bearing zero degrees.
+     */
+    public void select(List<Long> positions, String dimensionId, String label) {
+        if (positions == null || positions.isEmpty()) {
+            clear();
+            return;
+        }
         ChestTrackerConfig config = ChestTrackerConfig.get();
         this.timer = new HighlightTimer(config.highlightDurationMs(),
                 config.highlightRecedingGraceMs(), SAMPLE_INTERVAL_MS);
-        this.pos = pos;
+        this.targets = List.copyOf(positions);
         this.dimensionId = dimensionId;
         this.label = label;
 
         LocalPlayer player = Minecraft.getInstance().player;
-        double distance = player == null ? 0 : distanceTo(player);
+        double distance = player == null ? 0 : distanceTo(player, nearestTo(player));
         timer.start(distance, System.currentTimeMillis());
     }
 
     public void clear() {
         timer.clear();
+        targets = List.of();
     }
 
     public boolean isActive() {
         return timer.isActive();
     }
 
+    /**
+     * Every container this selection matched.
+     *
+     * <p>Guidance uses only the nearest; this is the whole set, for drawing all
+     * of them in the world once that exists.
+     */
+    public List<Long> targets() {
+        return targets;
+    }
+
+    /** The dimension every target is in, or null when inactive. */
+    public String dimensionId() {
+        return dimensionId;
+    }
+
+    /** What the highlight is looking for, or null when inactive. */
+    public String label() {
+        return label;
+    }
+
+    /** The one being guided to right now: the nearest. Zero when inactive. */
     public long pos() {
-        return pos;
+        LocalPlayer player = Minecraft.getInstance().player;
+        return targets.isEmpty() || player == null ? 0L : nearestTo(player);
     }
 
     /**
@@ -77,45 +129,79 @@ public final class ContainerHighlight {
      * <p>Guidance goes to the action bar rather than a custom HUD overlay: it is
      * plain vanilla API, behaves identically on every supported version, and in
      * a base of any size a bearing and a distance are more use than an outline
-     * the player cannot see through a wall anyway.
+     * the player cannot see through a wall anyway. Container screens report
+     * themselves as in-game UI, so this is readable without closing the chest
+     * the player pressed the key in.
      */
     public void tick() {
         if (!timer.isActive()) return;
 
         Minecraft client = Minecraft.getInstance();
         LocalPlayer player = client.player;
-        if (player == null) {
-            timer.clear();
+        if (player == null || targets.isEmpty()) {
+            clear();
             return;
         }
         if (!player.level().dimension().identifier().toString().equals(dimensionId)) {
             // Guidance across dimensions would be nonsense.
-            timer.clear();
+            clear();
             return;
         }
 
-        double distance = distanceTo(player);
+        long target = nearestTo(player);
+        double distance = distanceTo(player, target);
         if (!timer.update(distance, System.currentTimeMillis())) {
             return;
         }
 
         if (distance <= ARRIVAL_DISTANCE) {
-            ClientCompat.actionBar(Component.literal(label + " - you are here")
+            ClientCompat.actionBar(Component.literal(label + " - you are here" + remainder())
                     .withStyle(ChatFormatting.GREEN));
             return;
         }
 
-        ClientCompat.actionBar(Component.literal(String.format("%s  %s  %.0fm",
-                label, bearing(player), distance)).withStyle(ChatFormatting.AQUA));
+        ClientCompat.actionBar(Component.literal(String.format("%s  %s  %.0fm%s",
+                label, bearing(player, target), distance, remainder()))
+                .withStyle(ChatFormatting.AQUA));
     }
 
-    private double distanceTo(LocalPlayer player) {
+    /**
+     * How many other containers hold it.
+     *
+     * <p>Without this the hotkey looks like it found one container when it
+     * found thirty, and the player has no reason to keep walking past the first.
+     */
+    private String remainder() {
+        return targets.size() > 1 ? "  (+" + (targets.size() - 1) + " more)" : "";
+    }
+
+    /**
+     * The closest target to the player.
+     *
+     * <p>Re-chosen every tick rather than fixed at selection time, so walking
+     * towards a different one of them hands guidance over instead of marching
+     * the player past it.
+     */
+    private long nearestTo(LocalPlayer player) {
+        long best = targets.get(0);
+        double bestDistance = distanceTo(player, best);
+        for (int i = 1; i < targets.size(); i++) {
+            double distance = distanceTo(player, targets.get(i));
+            if (distance < bestDistance) {
+                bestDistance = distance;
+                best = targets.get(i);
+            }
+        }
+        return best;
+    }
+
+    private double distanceTo(LocalPlayer player, long pos) {
         return Math.sqrt(BlockKey.distanceSq(
                 BlockKey.pack(player.getBlockX(), player.getBlockY(), player.getBlockZ()), pos));
     }
 
     /** Where the container is relative to where the player is facing. */
-    private String bearing(LocalPlayer player) {
+    private String bearing(LocalPlayer player, long pos) {
         double dx = BlockKey.x(pos) + 0.5 - player.getX();
         double dz = BlockKey.z(pos) + 0.5 - player.getZ();
         double targetYaw = Math.toDegrees(Math.atan2(-dx, dz));

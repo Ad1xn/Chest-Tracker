@@ -15,6 +15,7 @@ import org.lwjgl.glfw.GLFW;
 public final class ChestTrackerClient implements ClientModInitializer {
 
     private static KeyMapping openSearch;
+    private static KeyMapping searchHovered;
 
     @Override
     public void onInitializeClient() {
@@ -32,6 +33,19 @@ public final class ChestTrackerClient implements ClientModInitializer {
                 // Categories became a record of an Identifier; INVENTORY is where
                 // a storage-search bind belongs in the controls screen.
                 KeyMapping.Category.INVENTORY));
+
+        // Z is free in vanilla and sits under the left hand while the right one
+        // is on the mouse, which is the posture this is used in: cursor over a
+        // stack in a chest, asking where the rest of it is.
+        searchHovered = ClientCompat.registerKeyMapping(new KeyMapping(
+                "key.chestindex.search_hovered",
+                InputConstants.Type.KEYSYM,
+                GLFW.GLFW_KEY_Z,
+                KeyMapping.Category.INVENTORY));
+
+        // Keybinds do not fire while a screen is open, so the in-container half
+        // of this listens on the screen itself rather than on the client tick.
+        ContainerScreens.register(searchHovered);
 
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             while (openSearch.consumeClick()) {

@@ -84,6 +84,26 @@ public final class ChestTrackerConfig {
     /** Whatever was last typed in the search box. */
     public String searchText = "";
 
+    // --- Container screens ------------------------------------------------
+
+    /** Whether a search button is drawn on chests, furnaces and the like. */
+    public boolean containerSearchButton = true;
+
+    /**
+     * Where that button sits, measured from the container window's top-right
+     * corner.
+     *
+     * <p>From the right rather than the left because container windows are not
+     * all the same width - a fixed offset from the left edge puts the button in
+     * the middle of a narrow one. Negative x is inside the window.
+     *
+     * <p>Right-dragging the button writes these, so the setting exists mostly
+     * to persist what the player did rather than to be edited by hand.
+     */
+    public int searchButtonX = -15;
+
+    public int searchButtonY = 4;
+
     // --- Multiplayer ------------------------------------------------------
 
     /**

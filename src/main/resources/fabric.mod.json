@@ -13,7 +13,10 @@
     "server": [ "dev.adrian.chesttracker.server.ChestTrackerServer" ],
     "modmenu": [ "dev.adrian.chesttracker.client.ModMenuIntegration" ]
   },
-  "mixins": [ "${mod_id}.mixins.json" ],
+  "mixins": [
+    "${mod_id}.mixins.json",
+    { "config": "${mod_id}.client.mixins.json", "environment": "client" }
+  ],
   "suggests": {
     "modmenu": "*"
   },

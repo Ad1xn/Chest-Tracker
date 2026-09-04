@@ -2,6 +2,7 @@ package dev.adrian.chesttracker.client.platform;
 
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.components.AbstractWidget;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 
@@ -45,5 +46,21 @@ public final class ClientCompat {
     /** {@code setScreenAndShow} exists on both versions; {@code setScreen} does not. */
     public static void openScreen(Screen screen) {
         Minecraft.getInstance().setScreenAndShow(screen);
+    }
+
+    /**
+     * Adds a widget to a screen this mod did not write.
+     *
+     * <p>Fabric renamed this accessor for 26.x along with the rest of its screen
+     * module. The list it hands back is live - what goes into it is rendered and
+     * receives input - which is why this is the supported way onto somebody
+     * else's screen rather than a mixin of our own.
+     */
+    public static void addWidget(Screen screen, AbstractWidget widget) {
+        //? if >=26.1 {
+        /*net.fabricmc.fabric.api.client.screen.v1.Screens.getWidgets(screen).add(widget);
+        *///?} else {
+        net.fabricmc.fabric.api.client.screen.v1.Screens.getButtons(screen).add(widget);
+        //?}
     }
 }
