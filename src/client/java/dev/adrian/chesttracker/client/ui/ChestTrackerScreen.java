@@ -59,6 +59,8 @@ public final class ChestTrackerScreen extends Screen {
     private static final int BOTTOM_H = 7;
     private static final int SLOTS_W = 169;       // left border plus nine slots
     private static final int SCROLL_COL = 14;     // widened for the scrollbar
+    private static final int EDGE_W = 7;          // the window's side border
+    private static final int FILLER_U = 100;      // a uniform column of the borders
 
     private static final int COLS = 9;
     private static final int ROWS = 6;
@@ -237,7 +239,10 @@ public final class ChestTrackerScreen extends Screen {
 
         String title = hoverLabel != null ? hoverLabel
                 : selectedItemId >= 0 ? displayName(selectedItemId) : "Chest Tracker";
-        gfx.text(font, Component.literal(title), panelX + 8, panelY + 6, TEXT_DARK);
+        // The toolbar occupies the right of the title row, so the text is
+        // clipped to what is left rather than running underneath it.
+        int available = buttonX(0) - (panelX + 8) - 4;
+        gfx.text(font, Component.literal(truncate(title, available)), panelX + 8, panelY + 6, TEXT_DARK);
     }
 
     /**
@@ -248,26 +253,49 @@ public final class ChestTrackerScreen extends Screen {
      * so those are drawn as left-plus-slots, a flat filler, and the right border.
      */
     private void drawWindow(Gfx gfx) {
-        int rightX = panelX + panelW - GUI_W;
         int searchY = panelY + TOP_H;
         int gridTop = searchY + SEARCH_H;
         int bottomY = gridTop + ROWS_H;
 
-        gfx.blit(CONTAINER_TEXTURE, panelX, panelY, 0, 0, GUI_W, TOP_H, SHEET, SHEET);
-        gfx.blit(CONTAINER_TEXTURE, rightX, panelY, 0, 0, GUI_W, TOP_H, SHEET, SHEET);
+        drawBand(gfx, 0, TOP_H, panelY);
+        drawSearchStrip(gfx, searchY);
+        drawSlotBand(gfx, gridTop);
+        drawBand(gfx, BOTTOM_V, BOTTOM_H, bottomY);
+    }
 
-        // Search strip: flat body with the side borders carried through.
+    /**
+     * Draws one horizontal band of the window, widened for the scrollbar column.
+     *
+     * <p>The band cannot simply be blitted twice, once right-aligned: its ends
+     * are corner art, so the second copy paints a corner into the middle of the
+     * panel. Instead the left part is drawn, the uniform middle is repeated a
+     * pixel at a time to bridge the extra width, and the right edge is drawn
+     * last so the border lands where the panel actually ends.
+     */
+    private void drawBand(Gfx gfx, int srcV, int height, int destY) {
+        gfx.blit(CONTAINER_TEXTURE, panelX, destY, 0, srcV, SLOTS_W, height, SHEET, SHEET);
+        for (int i = 0; i < SCROLL_COL; i++) {
+            gfx.blit(CONTAINER_TEXTURE, panelX + SLOTS_W + i, destY, FILLER_U, srcV, 1, height, SHEET, SHEET);
+        }
+        gfx.blit(CONTAINER_TEXTURE, panelX + panelW - EDGE_W, destY,
+                GUI_W - EDGE_W, srcV, EDGE_W, height, SHEET, SHEET);
+    }
+
+    /** The slot rows, whose middle is flat panel rather than repeatable art. */
+    private void drawSlotBand(Gfx gfx, int destY) {
+        gfx.blit(CONTAINER_TEXTURE, panelX, destY, 0, ROWS_V, SLOTS_W, ROWS_H, SHEET, SHEET);
+        gfx.fill(panelX + SLOTS_W, destY, panelX + panelW - EDGE_W, destY + ROWS_H, PANEL_FILL);
+        gfx.blit(CONTAINER_TEXTURE, panelX + panelW - EDGE_W, destY,
+                GUI_W - EDGE_W, ROWS_V, EDGE_W, ROWS_H, SHEET, SHEET);
+    }
+
+    private void drawSearchStrip(Gfx gfx, int searchY) {
         gfx.fill(panelX, searchY, panelX + panelW, searchY + SEARCH_H, PANEL_FILL);
-        gfx.blit(CONTAINER_TEXTURE, panelX, searchY, 0, 30, 7, SEARCH_H, SHEET, SHEET);
-        gfx.blit(CONTAINER_TEXTURE, panelX + panelW - 7, searchY, GUI_W - 7, 30, 7, SEARCH_H, SHEET, SHEET);
-        drawGroove(gfx, panelX + 7, searchY + 2, SLOTS_W - 8, 12);
-
-        gfx.blit(CONTAINER_TEXTURE, panelX, gridTop, 0, ROWS_V, SLOTS_W, ROWS_H, SHEET, SHEET);
-        gfx.fill(panelX + SLOTS_W, gridTop, panelX + panelW - 7, gridTop + ROWS_H, PANEL_FILL);
-        gfx.blit(CONTAINER_TEXTURE, panelX + panelW - 7, gridTop, GUI_W - 7, ROWS_V, 7, ROWS_H, SHEET, SHEET);
-
-        gfx.blit(CONTAINER_TEXTURE, panelX, bottomY, 0, BOTTOM_V, GUI_W, BOTTOM_H, SHEET, SHEET);
-        gfx.blit(CONTAINER_TEXTURE, rightX, bottomY, 0, BOTTOM_V, GUI_W, BOTTOM_H, SHEET, SHEET);
+        // Carry the side borders through the strip so the window edge is unbroken.
+        gfx.blit(CONTAINER_TEXTURE, panelX, searchY, 0, 30, EDGE_W, SEARCH_H, SHEET, SHEET);
+        gfx.blit(CONTAINER_TEXTURE, panelX + panelW - EDGE_W, searchY,
+                GUI_W - EDGE_W, 30, EDGE_W, SEARCH_H, SHEET, SHEET);
+        drawGroove(gfx, panelX + 7, searchY + 2, panelW - 14, 12);
     }
 
     /** The inset used by vanilla for slots and text fields. */
@@ -305,16 +333,23 @@ public final class ChestTrackerScreen extends Screen {
         }
     }
 
-    /** Stack counts sit bottom-right of the slot, light on dark, as in vanilla. */
+    /**
+     * Stack counts sit bottom-right of the slot, light on dark, as in vanilla.
+     *
+     * <p>Labels are kept to three characters. A slot is 18px and the font is
+     * not scaled here, so "3.1k" is wider than the slot and bleeds into its
+     * neighbour - which is exactly what it looked like.
+     */
     private void drawCount(Gfx gfx, int count, int slotX, int slotY) {
+        if (count <= 1) return; // Vanilla omits a count of one.
         String label = abbreviate(count);
         gfx.text(font, label, slotX + 17 - font.width(label), slotY + 9, TEXT_LIGHT);
     }
 
     private static String abbreviate(int count) {
         if (count < 1000) return Integer.toString(count);
-        if (count < 100_000) return String.format("%.1fk", count / 1000.0).replace(".0k", "k");
-        return (count / 1000) + "k";
+        if (count < 1_000_000) return (count / 1000) + "k";
+        return (count / 1_000_000) + "m";
     }
 
     private void drawScrollbar(Gfx gfx) {
@@ -421,6 +456,17 @@ public final class ChestTrackerScreen extends Screen {
     private static String displayName(int paletteId) {
         ItemStack stack = iconFor(paletteId);
         return stack.isEmpty() ? shortName(ClientTracker.nameOf(paletteId)) : stack.getHoverName().getString();
+    }
+
+    /** Trims text to a pixel width, with an ellipsis when it does not fit. */
+    private String truncate(String text, int maxWidth) {
+        if (font.width(text) <= maxWidth) return text;
+        StringBuilder trimmed = new StringBuilder();
+        for (char c : text.toCharArray()) {
+            if (font.width(trimmed.toString() + c + "...") > maxWidth) break;
+            trimmed.append(c);
+        }
+        return trimmed + "...";
     }
 
     private static String shortName(String registryId) {
