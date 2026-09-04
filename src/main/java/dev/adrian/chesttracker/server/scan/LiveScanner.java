@@ -12,6 +12,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.Container;
 import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.level.levelgen.structure.StructureStart;
 import net.minecraft.world.level.block.entity.RandomizableContainerBlockEntity;
 import net.minecraft.world.level.chunk.LevelChunk;
 
@@ -99,7 +100,8 @@ public final class LiveScanner {
 
             long key = BlockKey.pack(pos.getX(), pos.getY(), pos.getZ());
             actual.add(key);
-            tracker.record(dimensionId, toRecord(blockEntity, key, typeId, dimensionId, tick));
+            tracker.record(dimensionId, toRecord(blockEntity, key, typeId, dimensionId, tick,
+                    naturalityOf(level, pos, key, dimensionId)));
             found++;
         }
 
@@ -137,12 +139,38 @@ public final class LiveScanner {
 
         String typeId = ContainerTypes.idOf(blockEntity);
         if (typeId == null) return true;
-        tracker.record(dimensionId, toRecord(blockEntity, pos, typeId, dimensionId, level.getGameTime()));
+        tracker.record(dimensionId, toRecord(blockEntity, pos, typeId, dimensionId, level.getGameTime(),
+                naturalityOf(level, blockPos, pos, dimensionId)));
         return true;
     }
 
+    /**
+     * Whether a container we are seeing for the first time is part of generated
+     * structure.
+     *
+     * <p>Without this the live path classified nothing: a village or temple
+     * chest that somebody had already looted came back {@code UNKNOWN}, because
+     * the only signal being used was an unrolled loot table. The offline region
+     * scan has classified against structure bounds all along, so the two
+     * disagreed about the same chest depending on which one saw it.
+     *
+     * <p>Only asked for containers not already indexed. The answer cannot
+     * change for a position, the lookup is not free, and re-reads happen
+     * constantly - so paying for it once is the whole budget.
+     */
+    private Origin naturalityOf(ServerLevel level, BlockPos blockPos, long pos, String dimensionId) {
+        if (tracker.index(dimensionId).get(pos) != null) return Origin.UNKNOWN;
+
+        // A piece test rather than the structure's bounding box: a village's box
+        // covers a lot of ground that is not the village, and a chest a player
+        // built next door is not a village chest.
+        StructureStart start = level.structureManager()
+                .getStructureWithPieceAt(blockPos, holder -> true);
+        return start != null && start.isValid() ? Origin.NATURAL : Origin.UNKNOWN;
+    }
+
     private ContainerRecord toRecord(BlockEntity blockEntity, long pos, String typeId,
-                                     String dimensionId, long tick) {
+                                     String dimensionId, long tick, Origin observed) {
         // A generated chest that nobody has opened still has its loot table
         // unrolled, and reports an EMPTY inventory - its items do not exist
         // until someone opens it. Recording that as "empty" would be a lie, so
@@ -154,12 +182,16 @@ public final class LiveScanner {
         int typeKey = tracker.palette().intern(typeId);
 
         if (unlooted) {
+            // An unrolled loot table is proof on its own, whatever the structure
+            // lookup said.
             return new ContainerRecord(pos, dimId, typeKey, Origin.NATURAL, null,
                     true, false, null, tick, List.of());
         }
 
         List<StackEntry> contents = LiveContainerReader.read((Container) blockEntity, tracker.palette());
-        return new ContainerRecord(pos, dimId, typeKey, Origin.UNKNOWN, null,
+        // UNKNOWN here never overwrites an established classification -
+        // TrackerService#record merges it with whatever is already known.
+        return new ContainerRecord(pos, dimId, typeKey, observed, null,
                 false, true, null, tick, contents);
     }
 }

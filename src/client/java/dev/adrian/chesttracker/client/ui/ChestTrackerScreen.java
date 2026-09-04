@@ -71,14 +71,24 @@ public final class ChestTrackerScreen extends Screen {
     private static final int BEVEL_DARK = 0xFF555555;
     private static final int GROOVE = 0xFF8B8B8B;
     private static final int GROOVE_DARK = 0xFF373737;
-    // Vanilla's own container-label colour. Everything written on the window
-    // uses it; nothing is colour-coded, because a GUI built out of the vanilla
-    // chest texture that then writes in colours nowhere else in the game uses
-    // looks like a mod pasted over it.
-    private static final int TEXT_DARK = 0xFF404040;
+    /**
+     * Standard Minecraft text: white, with the drop shadow the font draws by
+     * default.
+     *
+     * <p>Vanilla's container labels are dark grey and shadowless, and copying
+     * that looked muddy here - the shadow is on by default in the draw call, so
+     * dark grey text was being drawn with a dark outline behind it.
+     *
+     * <p>Alpha is spelled out. {@code 0xFFFFFF} is fully transparent in ARGB
+     * and draws nothing at all; that bug has shipped here once already.
+     */
+    private static final int TEXT_MAIN = 0xFFFFFFFF;
 
-    /** Vanilla's greyed-out text, for a setting sitting at its default. */
-    private static final int TEXT_MUTED = 0xFF808080;
+    /** Standard secondary text, for a filter sitting at its default. */
+    private static final int TEXT_MUTED = 0xFFAAAAAA;
+
+    /** Icons drawn as shapes rather than glyphs need to contrast with the panel. */
+    private static final int ICON = 0xFF404040;
     private static final int TEXT_LIGHT = 0xFFFFFFFF;
     private static final int SLOT_HOVER = 0x80FFFFFF;
     private static final int ROW_HOVER = 0x40000000;
@@ -439,7 +449,7 @@ public final class ChestTrackerScreen extends Screen {
         }
 
         if (!canQuery()) {
-            gfx.text(font, Component.literal(unavailableMessage()), gridX(), gridY() + 4, TEXT_DARK);
+            gfx.text(font, Component.literal(unavailableMessage()), gridX(), gridY() + 4, TEXT_MAIN);
             return;
         }
 
@@ -455,7 +465,7 @@ public final class ChestTrackerScreen extends Screen {
         // The toolbar occupies the right of the title row, so the text is
         // clipped to what is left rather than running underneath it.
         int available = buttonX(0) - (panelX + 8) - 4;
-        gfx.text(font, Component.literal(truncate(title, available)), panelX + 8, panelY + 6, TEXT_DARK);
+        gfx.text(font, Component.literal(truncate(title, available)), panelX + 8, panelY + 6, TEXT_MAIN);
 
         drawMenu(gfx, mouseX, mouseY);
     }
@@ -583,7 +593,7 @@ public final class ChestTrackerScreen extends Screen {
                     displayName(summary.itemId()), summary.totalCount(), summary.containerCount());
         } else if (items.isEmpty()) {
             gfx.text(font, Component.literal(pending.isBlank() ? "Nothing indexed yet" : "No match"),
-                    gridX(), gridY() + 4, TEXT_DARK);
+                    gridX(), gridY() + 4, TEXT_MAIN);
         }
     }
 
@@ -689,10 +699,10 @@ public final class ChestTrackerScreen extends Screen {
                 // Drawn rather than typed: the font has no glyph that reads as
                 // a menu, and a letter would be back where we started.
                 for (int line = 0; line < 3; line++) {
-                    gfx.fill(x + 3, y + 3 + line * 3, x + BUTTON_SIZE - 3, y + 4 + line * 3, TEXT_DARK);
+                    gfx.fill(x + 3, y + 3 + line * 3, x + BUTTON_SIZE - 3, y + 4 + line * 3, ICON);
                 }
             } else {
-                gfx.text(font, "X", x + 3, y + 2, TEXT_DARK);
+                gfx.text(font, "X", x + 3, y + 2, TEXT_MAIN);
             }
         }
     }
@@ -719,7 +729,7 @@ public final class ChestTrackerScreen extends Screen {
             if (mouseX >= x && mouseX < x + MENU_W && mouseY >= rowY - 1 && mouseY < rowY + MENU_ROW_H - 1) {
                 gfx.fill(x + 1, rowY - 1, x + MENU_W, rowY + MENU_ROW_H - 1, SLOT_HOVER);
             }
-            gfx.text(font, Component.literal(row.label()), x + 4, rowY, TEXT_DARK);
+            gfx.text(font, Component.literal(row.label()), x + 4, rowY, TEXT_MAIN);
             // The value is right-aligned so the states line up in a column and
             // can be read down without reading every label.
             String value = row.value();
@@ -727,7 +737,7 @@ public final class ChestTrackerScreen extends Screen {
             // been moved off its default reads at full strength, one left alone
             // is greyed. Both are vanilla greys.
             gfx.text(font, Component.literal(value), x + MENU_W - 4 - font.width(value), rowY,
-                    row.active() ? TEXT_DARK : TEXT_MUTED);
+                    row.active() ? TEXT_MAIN : TEXT_MUTED);
         }
     }
 
@@ -738,7 +748,7 @@ public final class ChestTrackerScreen extends Screen {
 
         if (containers.isEmpty()) {
             gfx.text(font, Component.literal(containersPending ? "Looking..." : "Nothing holds that."),
-                    x, y, TEXT_DARK);
+                    x, y, TEXT_MAIN);
             return;
         }
 
@@ -747,7 +757,7 @@ public final class ChestTrackerScreen extends Screen {
             boolean hovered = mouseX >= x && mouseX <= panelX + panelW - 10
                     && mouseY >= y && mouseY < y + DETAIL_ROW;
             if (hovered) gfx.fill(x - 1, y - 1, panelX + panelW - 10, y + DETAIL_ROW - 1, ROW_HOVER);
-            gfx.text(font, Component.literal(describe(hit)), x, y, TEXT_DARK);
+            gfx.text(font, Component.literal(describe(hit)), x, y, TEXT_MAIN);
             y += DETAIL_ROW;
         }
         hoverLabel = "Click to be guided  -  right-click to go back";
