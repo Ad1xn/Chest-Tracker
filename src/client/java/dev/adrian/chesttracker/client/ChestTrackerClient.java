@@ -5,6 +5,7 @@ import dev.adrian.chesttracker.ChestTracker;
 import dev.adrian.chesttracker.client.highlight.ContainerHighlight;
 import dev.adrian.chesttracker.client.net.ServerLink;
 import dev.adrian.chesttracker.client.platform.ClientCompat;
+import dev.adrian.chesttracker.client.platform.WorldHighlightHook;
 import dev.adrian.chesttracker.client.ui.ChestTrackerScreen;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
@@ -23,6 +24,11 @@ public final class ChestTrackerClient implements ClientModInitializer {
         // Receivers and connection state, so the screen knows what it is
         // talking to before the player opens it.
         ServerLink.register();
+
+        // Boxes around tracked containers. The only part of the mod that talks
+        // to the world renderer, and the only place the two targets diverge
+        // enough to need a whole separate registration.
+        WorldHighlightHook.register();
 
         // GRAVE matches the muscle memory of the mod this replaces.
         openSearch = ClientCompat.registerKeyMapping(new KeyMapping(

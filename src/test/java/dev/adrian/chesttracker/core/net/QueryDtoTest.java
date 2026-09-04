@@ -12,7 +12,9 @@ class QueryDtoTest {
 
     @Test
     void originFilterMapsToTheMatchingOrigin() {
-        assertEquals(Set.of(Origin.PLAYER_PLACED),
+        // "Built" covers the uncertain case as well; see the two tests below
+        // for why that is the point rather than a looseness.
+        assertEquals(Set.of(Origin.PLAYER_PLACED, Origin.UNKNOWN),
                 new QueryDto.Filters(true, false, QueryDto.Filters.ORIGIN_PLAYER_PLACED).origins());
         assertEquals(Set.of(Origin.NATURAL),
                 new QueryDto.Filters(true, false, QueryDto.Filters.ORIGIN_NATURAL).origins());
@@ -32,6 +34,30 @@ class QueryDtoTest {
         assertEquals(QueryDto.Filters.ORIGIN_ANY, new QueryDto.Filters(true, false, 99).originFilter());
         assertEquals(QueryDto.Filters.ORIGIN_ANY, new QueryDto.Filters(true, false, -3).originFilter());
         assertTrue(new QueryDto.Filters(true, false, 99).origins().isEmpty());
+    }
+
+    @Test
+    void theBuiltFilterKeepsContainersWhosePlacementWasNeverSeen() {
+        // A world that predates the mod has no record of anyone placing
+        // anything, so every chest a player owns is UNKNOWN. Reading the label
+        // literally would show them an empty grid and imply the only fix is to
+        // re-place every chest they have.
+        Set<Origin> built = new QueryDto.Filters(true, false,
+                QueryDto.Filters.ORIGIN_PLAYER_PLACED).origins();
+
+        assertTrue(built.contains(Origin.PLAYER_PLACED));
+        assertTrue(built.contains(Origin.UNKNOWN));
+        assertFalse(built.contains(Origin.NATURAL));
+    }
+
+    @Test
+    void theGeneratedFilterStaysExact() {
+        // Generated containers are positively identified - a structure piece or
+        // an unrolled loot table - so this side has no reason to guess.
+        Set<Origin> generated = new QueryDto.Filters(true, false,
+                QueryDto.Filters.ORIGIN_NATURAL).origins();
+
+        assertEquals(Set.of(Origin.NATURAL), generated);
     }
 
     @Test

@@ -4,10 +4,15 @@ import dev.adrian.chesttracker.client.platform.ClientCompat;
 import dev.adrian.chesttracker.config.ChestTrackerConfig;
 import dev.adrian.chesttracker.core.highlight.HighlightTimer;
 import dev.adrian.chesttracker.core.util.BlockKey;
+import com.mojang.blaze3d.vertex.PoseStack;
+import com.mojang.blaze3d.vertex.VertexConsumer;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.network.chat.Component;
+import net.minecraft.world.phys.Vec3;
+
+import java.util.List;
 
 /**
  * The container the player is currently being guided to.
@@ -36,9 +41,21 @@ public final class ContainerHighlight {
      */
     private HighlightTimer timer = HighlightTimer.defaults();
 
+    /**
+     * Every container being pointed at, nearest first is not assumed - the
+     * nearest is recomputed as the player moves.
+     */
+    private List<Long> positions = List.of();
+
     private long pos;
     private String dimensionId;
     private String label;
+
+    /** Beyond this there is nothing on screen to draw a box around anyway. */
+    private static final double DRAW_RADIUS = 160.0;
+
+    /** Enough to show a base's worth without filling the screen with wire. */
+    private static final int MAX_BOXES = 96;
 
     private ContainerHighlight() {}
 
@@ -46,7 +63,25 @@ public final class ContainerHighlight {
         return INSTANCE;
     }
 
+    /** Points at one container - a row picked out of the list. */
     public void select(long pos, String dimensionId, String label) {
+        select(List.of(pos), dimensionId, label);
+    }
+
+    /**
+     * Points at every container holding the chosen item.
+     *
+     * <p>The action bar still describes only the nearest, because a bearing to
+     * nine places at once is not guidance. The boxes are what say "and also
+     * there, and there".
+     */
+    public void select(List<Long> positions, String dimensionId, String label) {
+        this.positions = positions == null ? List.of() : List.copyOf(positions);
+        long nearest = this.positions.isEmpty() ? 0 : this.positions.get(0);
+        selectPrimary(nearest, dimensionId, label);
+    }
+
+    private void selectPrimary(long pos, String dimensionId, String label) {
         ChestTrackerConfig config = ChestTrackerConfig.get();
         this.timer = new HighlightTimer(config.highlightDurationMs(),
                 config.highlightRecedingGraceMs(), SAMPLE_INTERVAL_MS);
@@ -61,6 +96,66 @@ public final class ContainerHighlight {
 
     public void clear() {
         timer.clear();
+        positions = List.of();
+    }
+
+    /** Whether there is anything for the world renderer to draw. */
+    public boolean hasBoxes() {
+        return timer.isActive() && !positions.isEmpty()
+                && ChestTrackerConfig.get().inWorldHighlight;
+    }
+
+    /**
+     * Draws a box around each highlighted container.
+     *
+     * <p>Called from the render thread, once per frame, so it reads state and
+     * allocates nothing. Positions far enough away to be off screen are skipped
+     * rather than drawn and clipped - a base with hundreds of matching barrels
+     * would otherwise submit hundreds of boxes to be thrown away.
+     *
+     * @param eye the camera position; boxes are drawn relative to it
+     */
+    public void drawBoxes(PoseStack.Pose pose, VertexConsumer lines, Vec3 eye) {
+        int drawn = 0;
+        for (Long position : positions) {
+            if (drawn >= MAX_BOXES) break;
+
+            double x = BlockKey.x(position);
+            double y = BlockKey.y(position);
+            double z = BlockKey.z(position);
+
+            double dx = x + 0.5 - eye.x;
+            double dy = y + 0.5 - eye.y;
+            double dz = z + 0.5 - eye.z;
+            if (dx * dx + dy * dy + dz * dz > DRAW_RADIUS * DRAW_RADIUS) continue;
+
+            // The nearest one is picked out, because that is the one the action
+            // bar is talking about and the one the player is walking towards.
+            boolean nearest = position == pos;
+            HighlightBox.emit(pose, lines, x - eye.x, y - eye.y, z - eye.z,
+                    nearest ? 1.0f : 0.25f,
+                    nearest ? 0.82f : 0.85f,
+                    nearest ? 0.2f : 1.0f,
+                    0.9f);
+            drawn++;
+        }
+    }
+
+    /** Re-points the guidance at whichever highlighted container is closest now. */
+    private void followNearest(LocalPlayer player) {
+        if (positions.size() < 2) return;
+
+        long best = pos;
+        double bestDistSq = Double.MAX_VALUE;
+        long from = BlockKey.pack(player.getBlockX(), player.getBlockY(), player.getBlockZ());
+        for (Long position : positions) {
+            double distSq = BlockKey.distanceSq(from, position);
+            if (distSq < bestDistSq) {
+                bestDistSq = distSq;
+                best = position;
+            }
+        }
+        pos = best;
     }
 
     public boolean isActive() {
@@ -93,6 +188,10 @@ public final class ContainerHighlight {
             timer.clear();
             return;
         }
+
+        // Walking past one of them makes another the nearest; the arrow should
+        // follow rather than keep pointing behind.
+        followNearest(player);
 
         double distance = distanceTo(player);
         if (!timer.update(distance, System.currentTimeMillis())) {

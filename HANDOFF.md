@@ -16,7 +16,7 @@ containers after you physically open them.
 - Local: `/Users/adrian/chesttracker`
 - Targets: **MC 1.21.11 and 26.2**, Fabric, both first-class
 - Released: `v0.1.0`, with a GitHub Actions release workflow on `v*` tags
-- 129 unit tests, green on both targets
+- 132 unit tests, green on both targets
 
 ### The constraint that shapes everything
 
@@ -195,6 +195,34 @@ platform/NetworkCompat     the one version shim: PayloadTypeRegistry accessors
 client/net/ServerLink      connection state, correlation, timeouts, fallback
 ```
 
+### The in-world highlight, and where the two renderers really differ
+
+**The old note here was wrong: `WorldRenderEvents` does not exist on 26.2 in any form.** Fabric
+rewrote world rendering for the deferred renderer.
+
+| | 1.21.11 | 26.2 |
+|---|---|---|
+| Events | `rendering.v1.world.WorldRenderEvents` | `rendering.v1.level.LevelRenderEvents` |
+| Hook used | `AFTER_ENTITIES` | `AFTER_TRANSLUCENT_TERRAIN` |
+| How you draw | `context.consumers()` gives a `MultiBufferSource`, drawn into immediately | no buffer source at all; geometry is *submitted* as a node and replayed in its own phase |
+| Camera | `gameRenderer().getMainCamera()` | `gameRenderer().mainCamera()` |
+
+All of that is contained in `client/platform/WorldHighlightHook`, which is the only class that knows
+about it.
+
+**Identical on both, verified by `javap`, so deliberately not shimmed:** `SubmitNodeCollector` (byte
+for byte, and it exists on 1.21.11 too), `SubmitNodeCollector.CustomGeometryRenderer`,
+`VertexConsumer`, `PoseStack.Pose`, `RenderTypes.lines()`, `Camera.position()`. Both branches do
+nothing but obtain a pose and a consumer and hand them to `HighlightBox`.
+
+`HighlightBox` writes the twelve edges itself. The `renderLineBox` family is gone from **both**
+targets, and `ShapeRenderer` exists only on 1.21.11, so there is no shared vanilla helper left to
+call.
+
+Left-click on an item now outlines every container holding it and closes the screen; right-click
+opens the list of places. The action bar still describes only the nearest, and re-points itself as
+the player walks past one.
+
 ### Classification survives a re-read
 
 Both scanners build a `ContainerRecord` from scratch, and neither can tell who placed a container -
@@ -311,6 +339,17 @@ into a hopper and only saw what reached the chest" was undiscoverable - the hopp
 indexed the whole time, just filtered out of the results. The burger menu lists each filter with its
 current value.
 
+**Origin is about "generated or not", not "did we watch you place it".** The "built" filter includes
+`UNKNOWN` on purpose. Placement can only be observed as it happens, so on a world that predates the
+mod every chest a player ever built is `UNKNOWN` - and a filter that read its own label literally
+showed them none of their own base and implied the fix was to re-place every chest they owned.
+Generated containers are positively identified (a structure piece, or an unrolled loot table), so
+the uncertain case belongs on the side that does not lose the player their storage.
+
+Relatedly, the offline classifier now tests against structure **pieces** only, not the structure's
+own bounding box. A village's box spans the whole settlement including fields and paths, so a base
+built among them was being classified as generated.
+
 **Screen state is remembered.** Sort, origin, the two toggles and the search text are written to
 the config when the screen closes, and seeded back on open.
 
@@ -327,9 +366,6 @@ still falls back to "No index here yet." within the grace period.
 
 ## Not done
 
-- **In-world highlight box.** Guidance is action-bar only. Needs the world-render API probed on both
-  versions — the most likely place the Vulkan rework bites. `WorldRenderEvents` exists in Fabric API
-  for both but the context API was not compared.
 - **Vanilla-server fallback** (locations from loaded chunks + remember-on-open). Phase 7 only made
   the *detection* honest: the client now recognises a server without the mod and says "No index here
   yet." instead of appearing broken. It still indexes nothing there. **Note the README's "Where it

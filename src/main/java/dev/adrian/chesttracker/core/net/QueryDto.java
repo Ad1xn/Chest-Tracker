@@ -44,9 +44,26 @@ public final class QueryDto {
             return new Filters(true, false, ORIGIN_ANY);
         }
 
+        /**
+         * What the origin filter actually selects.
+         *
+         * <p>"Player-built" deliberately includes {@link Origin#UNKNOWN}, and
+         * this matters more than it looks. Placement can only be observed as it
+         * happens, so on a world that existed before the mod was installed
+         * <em>every</em> chest a player ever built is {@code UNKNOWN} - and a
+         * filter that took the label literally would show them none of their
+         * own base and tell them to go and re-place every chest they own.
+         *
+         * <p>The reverse reading is sound: generated containers are positively
+         * identified, by a structure piece or an unrolled loot table. Anything
+         * that is not generated and is standing in the world was put there by
+         * somebody. So the filter is really "generated or not", and the
+         * uncertain case belongs on the side that does not lose the player
+         * their own storage.
+         */
         public Set<Origin> origins() {
             return switch (originFilter) {
-                case ORIGIN_PLAYER_PLACED -> Set.of(Origin.PLAYER_PLACED);
+                case ORIGIN_PLAYER_PLACED -> Set.of(Origin.PLAYER_PLACED, Origin.UNKNOWN);
                 case ORIGIN_NATURAL -> Set.of(Origin.NATURAL);
                 default -> Set.of();
             };

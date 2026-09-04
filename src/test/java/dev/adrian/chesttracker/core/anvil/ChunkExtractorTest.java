@@ -147,7 +147,7 @@ class ChunkExtractorTest {
     }
 
     @Test
-    void extractsStructureBoundingBoxesIncludingChildren() throws IOException {
+    void usesStructurePiecesRatherThanTheWholeStructureBox() throws IOException {
         NbtCompound chunk = parse(NbtTestWriter.compound()
                 .put("structures", NbtTestWriter.compound()
                         .put("starts", NbtTestWriter.compound()
@@ -159,10 +159,32 @@ class ChunkExtractorTest {
         List<ChunkExtractor.StructureBox> boxes =
                 ChunkExtractor.extract(chunk, null, 0, palette, 0L).structureBoxes();
 
-        assertEquals(2, boxes.size());
-        assertTrue(boxes.get(0).contains(20, 70, 20));
-        assertFalse(boxes.get(0).contains(100, 70, 20));
-        assertTrue(boxes.get(1).contains(10, 65, 10), "children must be included, not just the outer box");
+        // Only the piece. The structure's own box spans the whole settlement -
+        // fields, paths, and everything a player has since built among them -
+        // so classifying against it declares a base built in a village to be
+        // generated, and the player is then told none of their storage is
+        // theirs.
+        assertEquals(1, boxes.size());
+        assertTrue(boxes.get(0).contains(10, 65, 10), "the piece itself is generated");
+        assertFalse(boxes.get(0).contains(30, 70, 30),
+                "inside the village's overall box but not in any building");
+    }
+
+    @Test
+    void fallsBackToTheStructureBoxWhenItHasNoPieces() throws IOException {
+        // Some structures record no children; then their own box is the piece,
+        // and dropping it would classify nothing at all.
+        NbtCompound chunk = parse(NbtTestWriter.compound()
+                .put("structures", NbtTestWriter.compound()
+                        .put("starts", NbtTestWriter.compound()
+                                .put("minecraft:buried_treasure", NbtTestWriter.compound()
+                                        .put("BB", new int[]{0, 60, 0, 4, 64, 4})))));
+
+        List<ChunkExtractor.StructureBox> boxes =
+                ChunkExtractor.extract(chunk, null, 0, palette, 0L).structureBoxes();
+
+        assertEquals(1, boxes.size());
+        assertTrue(boxes.get(0).contains(2, 62, 2));
     }
 
     @Test
