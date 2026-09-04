@@ -21,7 +21,7 @@ public final class ChestTrackerClient implements ClientModInitializer {
 
         // GRAVE matches the muscle memory of the mod this replaces.
         openSearch = ClientCompat.registerKeyMapping(new KeyMapping(
-                "key.chesttracker.search",
+                "key.chestindex.search",
                 InputConstants.Type.KEYSYM,
                 GLFW.GLFW_KEY_GRAVE_ACCENT,
                 // Categories became a record of an Identifier; INVENTORY is where

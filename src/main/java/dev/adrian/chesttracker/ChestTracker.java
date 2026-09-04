@@ -20,7 +20,10 @@ import org.slf4j.LoggerFactory;
  */
 public final class ChestTracker implements ModInitializer {
 
-    public static final String MOD_ID = "chesttracker";
+    // The internal id must differ from the original Chest Tracker's, or Fabric
+    // resolves the collision by id and this mod silently never loads. The
+    // display name stays "ChestTracker"; only the id and its derived paths move.
+    public static final String MOD_ID = "chestindex";
     public static final Logger LOG = LoggerFactory.getLogger("ChestTracker");
 
     @Override

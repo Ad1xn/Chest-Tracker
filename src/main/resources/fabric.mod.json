@@ -12,7 +12,10 @@
     "client": [ "dev.adrian.chesttracker.client.ChestTrackerClient" ],
     "server": [ "dev.adrian.chesttracker.server.ChestTrackerServer" ]
   },
-  "mixins": [ "chesttracker.mixins.json" ],
+  "mixins": [ "${mod_id}.mixins.json" ],
+  "breaks": {
+    "chesttracker": "*"
+  },
   "depends": {
     "fabricloader": ">=${loader_dep}",
     "minecraft": "${mc_dep}",
