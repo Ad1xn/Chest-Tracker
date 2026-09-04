@@ -50,7 +50,8 @@ public final class ChestTrackerClient implements ClientModInitializer {
                 KeyMapping.Category.INVENTORY));
 
         // Keybinds do not fire while a screen is open, so the in-container half
-        // of this listens on the screen itself rather than on the client tick.
+        // of this listens on the screen itself - and, because that turned out
+        // not to be delivered here, polls the window too. See ContainerScreens.
         ContainerScreens.register(searchHovered);
 
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
@@ -58,6 +59,7 @@ public final class ChestTrackerClient implements ClientModInitializer {
                 ClientCompat.openScreen(new ChestTrackerScreen());
             }
             ContainerHighlight.get().tick();
+            ContainerScreens.tick();
             // Expires the wait for a server that never announced itself, and
             // any request whose reply is never coming.
             ServerLink.tick();

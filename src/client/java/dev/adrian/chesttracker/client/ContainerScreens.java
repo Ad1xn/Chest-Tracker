@@ -1,12 +1,16 @@
 package dev.adrian.chesttracker.client;
 
+import com.mojang.blaze3d.platform.InputConstants;
+import dev.adrian.chesttracker.ChestTracker;
 import dev.adrian.chesttracker.client.platform.ClientCompat;
 import dev.adrian.chesttracker.client.ui.SearchButton;
 import dev.adrian.chesttracker.config.ChestTrackerConfig;
 import dev.adrian.chesttracker.mixin.client.ContainerScreenAccessor;
+import dev.adrian.chesttracker.mixin.client.KeyMappingAccessor;
 import net.fabricmc.fabric.api.client.screen.v1.ScreenEvents;
 import net.fabricmc.fabric.api.client.screen.v1.ScreenKeyboardEvents;
 import net.minecraft.client.KeyMapping;
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.world.inventory.Slot;
 
@@ -17,16 +21,55 @@ import net.minecraft.world.inventory.Slot;
  * because that is where the question "where is the rest of this?" gets asked:
  * a key over the stack, and a button on the window.
  *
- * <p>Everything hangs off {@code AFTER_INIT} rather than a mixin on the screen
- * itself. A screen is re-initialised on every resize, so this runs again with
- * the new geometry for free, and it applies to modded containers - which are
- * subclasses of the same class - without knowing they exist.
+ * <p>The button hangs off {@code AFTER_INIT} rather than a mixin on the screen
+ * itself. A screen is re-initialised on every resize, so it is repositioned for
+ * free, and it lands on modded containers - subclasses of the same class -
+ * without knowing they exist.
+ *
+ * <h2>Why the key is read twice</h2>
+ *
+ * <p>A key pressed while a screen is open never reaches {@code consumeClick()}:
+ * vanilla only queues those when no screen is up. The documented way in is
+ * Fabric's per-screen keyboard events, and it is what the mod this one replaces
+ * uses, so it is tried first.
+ *
+ * <p>It did not fire here. That path runs inside a MixinExtras wrapper around
+ * the screen's {@code keyPressed}, so anything that replaces or short-circuits
+ * that call takes the hook with it - and this profile carries several input
+ * mods, two of them dedicated to rewriting macOS key handling. So the window is
+ * also polled once a tick, which nothing sits in front of.
+ *
+ * <p>Both routes end in {@link #trigger}, which ignores a second call within
+ * {@link #DEBOUNCE_MS} so having both cannot search twice for one press. It
+ * logs which route won, because that is the only way to learn from here which
+ * one this environment actually delivers.
  */
 public final class ContainerScreens {
 
     private ContainerScreens() {}
 
+    /**
+     * Long enough that the two routes cannot both answer one press, short
+     * enough that deliberately pressing again still works.
+     */
+    private static final long DEBOUNCE_MS = 300;
+
+    private static KeyMapping searchKey;
+    private static boolean keyWasDown;
+    private static long lastTrigger;
+
+    /**
+     * The container screen currently open, or null.
+     *
+     * <p>Tracked here rather than read off {@code Minecraft}: the field is
+     * public on 1.21.11 and has no accessor at all on 26.2, and this is handed
+     * the screen anyway. Cleared on removal, so it holds nothing once closed.
+     */
+    private static AbstractContainerScreen<?> openContainer;
+
     public static void register(KeyMapping searchHovered) {
+        searchKey = searchHovered;
+
         ScreenEvents.AFTER_INIT.register((client, screen, width, height) -> {
             if (!(screen instanceof AbstractContainerScreen<?> container)) return;
 
@@ -39,35 +82,79 @@ public final class ContainerScreens {
                         access.chesttracker$topPos()));
             }
 
-            // Before the screen sees the key rather than after it. Fabric wraps
-            // the screen's keyPressed and only reaches the "after" hook if the
-            // call completes; a screen or another mod that consumes the key
-            // first leaves it unreached. Acting first is safe here because this
-            // only ever fires on our own binding.
-            ScreenKeyboardEvents.beforeKeyPress(screen).register((ignored, keyEvent) -> {
-                if (!searchHovered.matches(keyEvent)) return;
-
-                // Requiring a hovered stack is also what keeps this from firing
-                // while somebody types a Z into an anvil or the creative search:
-                // the cursor cannot be over a slot and in a text field at once.
-                Slot hovered = access.chesttracker$hoveredSlot();
-                if (hovered == null || !hovered.hasItem()) {
-                    // Saying so rather than doing nothing. A silent no-op is
-                    // indistinguishable from the key not being bound, or from
-                    // the mod not being installed - which is exactly how this
-                    // was first reported.
-                    ContainerSearch.sayNothingHovered();
-                    return;
-                }
-
-                // Closing on a hit matches what clicking a row in the search
-                // screen already does: the question is answered, and the player
-                // is about to walk. Staying open would hide the guidance behind
-                // the very chest they are leaving.
-                if (ContainerSearch.findAndGuide(hovered.getItem())) {
-                    container.onClose();
+            openContainer = container;
+            ScreenEvents.remove(screen).register(closed -> {
+                if (openContainer == closed) {
+                    openContainer = null;
+                    keyWasDown = false;
                 }
             });
+
+            ScreenKeyboardEvents.beforeKeyPress(screen).register((ignored, keyEvent) -> {
+                if (searchHovered.matches(keyEvent)) trigger(container, "screen event");
+            });
         });
+    }
+
+    /**
+     * The polled route, from the client tick.
+     *
+     * <p>Reads the window rather than any event, so it is unaffected by whoever
+     * else is handling input. Edge-triggered: holding the key searches once.
+     */
+    public static void tick() {
+        AbstractContainerScreen<?> container = openContainer;
+        Minecraft client = Minecraft.getInstance();
+        if (container == null || searchKey == null || client.getWindow() == null) {
+            // Reset outside a container, so reopening one with the key already
+            // held is not mistaken for a fresh press.
+            keyWasDown = false;
+            return;
+        }
+
+        InputConstants.Key key = ((KeyMappingAccessor) searchKey).chesttracker$key();
+        boolean down = key != null
+                && key.getType() == InputConstants.Type.KEYSYM
+                && key.getValue() >= 0
+                && InputConstants.isKeyDown(client.getWindow(), key.getValue());
+
+        if (down && !keyWasDown) trigger(container, "poll");
+        keyWasDown = down;
+    }
+
+    /**
+     * Searches for whatever the cursor is over.
+     *
+     * @param via which route delivered the key, logged once per search so the
+     *            answer to "does this environment deliver screen key events"
+     *            ends up in the log rather than in somebody's guess
+     */
+    private static void trigger(AbstractContainerScreen<?> container, String via) {
+        long now = System.currentTimeMillis();
+        if (now - lastTrigger < DEBOUNCE_MS) return;
+        lastTrigger = now;
+
+        ChestTracker.LOG.info("Container search key fired via {}", via);
+
+        // Requiring a hovered stack is also what keeps this from firing while
+        // somebody types a Z into an anvil or the creative search: the cursor
+        // cannot be over a slot and in a text field at once.
+        Slot hovered = ((ContainerScreenAccessor) container).chesttracker$hoveredSlot();
+        if (hovered == null || !hovered.hasItem()) {
+            // Saying so rather than doing nothing. A silent no-op is
+            // indistinguishable from the key not being bound, or from the mod
+            // not being installed - which is exactly how this was first
+            // reported.
+            ContainerSearch.sayNothingHovered();
+            return;
+        }
+
+        // Closing on a hit matches what clicking a row in the search screen
+        // already does: the question is answered, and the player is about to
+        // walk. Staying open would hide the guidance behind the very chest they
+        // are leaving.
+        if (ContainerSearch.findAndGuide(hovered.getItem())) {
+            container.onClose();
+        }
     }
 }

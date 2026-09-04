@@ -4,7 +4,8 @@
   "package": "dev.adrian.chesttracker.mixin.client",
   "compatibilityLevel": "${mixin_compat}",
   "client": [
-    "ContainerScreenAccessor"
+    "ContainerScreenAccessor",
+    "KeyMappingAccessor"
   ],
   "injectors": {
     "defaultRequire": 1
