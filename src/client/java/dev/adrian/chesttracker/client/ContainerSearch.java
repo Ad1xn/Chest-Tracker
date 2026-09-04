@@ -42,22 +42,27 @@ public final class ContainerSearch {
      * toolbar: the screen's toggles belong to a window that is not open, and
      * inheriting whatever they were left on would make the key behave
      * differently depending on a screen the player cannot see.
+     *
+     * @return whether a search actually went out, so the caller knows whether
+     *         to close the container the player was looking in
      */
-    public static void findAndGuide(ItemStack stack) {
-        if (stack == null || stack.isEmpty()) return;
+    public static boolean findAndGuide(ItemStack stack) {
+        if (stack == null || stack.isEmpty()) return false;
 
         Minecraft client = Minecraft.getInstance();
         LocalPlayer player = client.player;
-        if (player == null) return;
+        if (player == null) return false;
 
         Identifier id = BuiltInRegistries.ITEM.getKey(stack.getItem());
-        if (id == null) return;
+        if (id == null) return false;
 
         String label = stack.getHoverName().getString();
 
         if (!ClientTracker.isAvailable()) {
+            // Not a hit, so the caller leaves the container open - the player is
+            // still standing at it and has been told why nothing happened.
             say(unavailableMessage(), ChatFormatting.RED);
-            return;
+            return false;
         }
 
         String dimensionId = player.level().dimension().identifier().toString();
@@ -82,6 +87,7 @@ public final class ContainerSearch {
                             hits.stream().map(QueryDto.ContainerHit::pos).toList(),
                             dimensionId, label);
                 }));
+        return true;
     }
 
     /**

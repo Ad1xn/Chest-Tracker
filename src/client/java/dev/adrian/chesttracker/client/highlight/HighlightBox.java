@@ -21,6 +21,18 @@ public final class HighlightBox {
     /** Drawn slightly outside the block, so the lines are not inside its faces. */
     private static final double SWELL = 0.002;
 
+    /**
+     * Width carried by every vertex, because the line format demands one.
+     *
+     * <p>{@code RenderPipelines.LINES} is built on
+     * {@code POSITION_COLOR_NORMAL_LINE_WIDTH} on <em>both</em> targets, and its
+     * render type sets no default - the width is per vertex and nothing fills
+     * it in. Omitting it does not draw a thin line, it throws
+     * {@code IllegalStateException: Missing elements in vertex} on the second
+     * vertex of the first edge, taking the render thread down with it.
+     */
+    private static final float LINE_WIDTH = 2.0f;
+
     private HighlightBox() {}
 
     /**
@@ -71,7 +83,9 @@ public final class HighlightBox {
                              float ax, float ay, float az, float bx, float by, float bz,
                              float nx, float ny, float nz,
                              float red, float green, float blue, float alpha) {
-        lines.addVertex(pose, ax, ay, az).setColor(red, green, blue, alpha).setNormal(pose, nx, ny, nz);
-        lines.addVertex(pose, bx, by, bz).setColor(red, green, blue, alpha).setNormal(pose, nx, ny, nz);
+        lines.addVertex(pose, ax, ay, az).setColor(red, green, blue, alpha)
+                .setNormal(pose, nx, ny, nz).setLineWidth(LINE_WIDTH);
+        lines.addVertex(pose, bx, by, bz).setColor(red, green, blue, alpha)
+                .setNormal(pose, nx, ny, nz).setLineWidth(LINE_WIDTH);
     }
 }

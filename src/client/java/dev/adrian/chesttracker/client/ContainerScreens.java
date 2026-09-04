@@ -39,7 +39,12 @@ public final class ContainerScreens {
                         access.chesttracker$topPos()));
             }
 
-            ScreenKeyboardEvents.afterKeyPress(screen).register((ignored, keyEvent) -> {
+            // Before the screen sees the key rather than after it. Fabric wraps
+            // the screen's keyPressed and only reaches the "after" hook if the
+            // call completes; a screen or another mod that consumes the key
+            // first leaves it unreached. Acting first is safe here because this
+            // only ever fires on our own binding.
+            ScreenKeyboardEvents.beforeKeyPress(screen).register((ignored, keyEvent) -> {
                 if (!searchHovered.matches(keyEvent)) return;
 
                 // Requiring a hovered stack is also what keeps this from firing
@@ -55,7 +60,13 @@ public final class ContainerScreens {
                     return;
                 }
 
-                ContainerSearch.findAndGuide(hovered.getItem());
+                // Closing on a hit matches what clicking a row in the search
+                // screen already does: the question is answered, and the player
+                // is about to walk. Staying open would hide the guidance behind
+                // the very chest they are leaving.
+                if (ContainerSearch.findAndGuide(hovered.getItem())) {
+                    container.onClose();
+                }
             });
         });
     }
