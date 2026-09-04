@@ -84,6 +84,17 @@ public final class ContainerSearch {
                 }));
     }
 
+    /**
+     * The key was pressed with the cursor over nothing.
+     *
+     * <p>Worth a message. The alternative - staying silent - cannot be told
+     * apart from the key being unbound or the mod being the wrong build, and a
+     * player who cannot tell those apart has no way to work out which.
+     */
+    public static void sayNothingHovered() {
+        say("Point at an item to search for it", ChatFormatting.GRAY);
+    }
+
     private static QueryDto.Filters filters() {
         ChestTrackerConfig config = ChestTrackerConfig.get();
         return new QueryDto.Filters(config.includeNested, false, QueryDto.Filters.ORIGIN_ANY);

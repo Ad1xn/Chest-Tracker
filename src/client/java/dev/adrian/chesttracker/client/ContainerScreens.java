@@ -46,7 +46,14 @@ public final class ContainerScreens {
                 // while somebody types a Z into an anvil or the creative search:
                 // the cursor cannot be over a slot and in a text field at once.
                 Slot hovered = access.chesttracker$hoveredSlot();
-                if (hovered == null || !hovered.hasItem()) return;
+                if (hovered == null || !hovered.hasItem()) {
+                    // Saying so rather than doing nothing. A silent no-op is
+                    // indistinguishable from the key not being bound, or from
+                    // the mod not being installed - which is exactly how this
+                    // was first reported.
+                    ContainerSearch.sayNothingHovered();
+                    return;
+                }
 
                 ContainerSearch.findAndGuide(hovered.getItem());
             });
