@@ -28,6 +28,15 @@ import net.minecraft.client.gui.GuiGraphics;
  */
 public final class ChestTrackerScreen extends Screen {
 
+    // Text colours are ARGB. A literal like 0xFFFFFF has an alpha of zero and
+    // draws perfectly invisibly, which is exactly as confusing as it sounds.
+    private static final int TEXT_PRIMARY = 0xFFFFFFFF;
+    private static final int TEXT_NORMAL = 0xFFCCCCCC;
+    private static final int TEXT_MUTED = 0xFFAAAAAA;
+    private static final int TEXT_FAINT = 0xFF888888;
+    private static final int PANEL_BACKGROUND = 0xC0101010;
+    private static final int ROW_HOVER = 0x33FFFFFF;
+
     private static final int MAX_RESULTS = 64;
     private static final int ROW_HEIGHT = 12;
     private static final int LIST_TOP = 52;
@@ -75,13 +84,16 @@ public final class ChestTrackerScreen extends Screen {
     }
 
     private void draw(Gfx gfx, int mouseX, int mouseY) {
+        // A panel behind the list, so rows stay legible over bright terrain.
+        gfx.fill(width / 2 - 156, LIST_TOP - 6, width / 2 + 156, height - 20, PANEL_BACKGROUND);
+
         gfx.text(font, Component.literal("ChestTracker").withStyle(ChatFormatting.BOLD),
-                width / 2 - 40, 10, 0xFFFFFF);
+                width / 2 - 40, 10, TEXT_PRIMARY);
 
         if (unavailable) {
             gfx.text(font, Component.literal(
                             "No index available here yet - multiplayer support is not wired up.")
-                    .withStyle(ChatFormatting.GRAY), width / 2 - 150, LIST_TOP, 0xAAAAAA);
+                    .withStyle(ChatFormatting.GRAY), width / 2 - 150, LIST_TOP, TEXT_MUTED);
             return;
         }
 
@@ -89,7 +101,7 @@ public final class ChestTrackerScreen extends Screen {
             gfx.text(font, Component.literal(pending.isBlank()
                             ? "Nothing indexed yet - try /chesttracker scanworld."
                             : "Nothing matches \"" + pending + "\".")
-                    .withStyle(ChatFormatting.GRAY), width / 2 - 150, LIST_TOP, 0xAAAAAA);
+                    .withStyle(ChatFormatting.GRAY), width / 2 - 150, LIST_TOP, TEXT_MUTED);
             return;
         }
 
@@ -99,13 +111,13 @@ public final class ChestTrackerScreen extends Screen {
             int y = LIST_TOP + (i - scroll) * ROW_HEIGHT;
             boolean hovered = mouseY >= y && mouseY < y + ROW_HEIGHT
                     && mouseX >= width / 2 - 150 && mouseX <= width / 2 + 150;
-            if (hovered) gfx.fill(width / 2 - 152, y - 1, width / 2 + 152, y + ROW_HEIGHT - 2, 0x33FFFFFF);
-            gfx.text(font, describe(results.get(i)), width / 2 - 150, y, hovered ? 0xFFFFFF : 0xCCCCCC);
+            if (hovered) gfx.fill(width / 2 - 152, y - 1, width / 2 + 152, y + ROW_HEIGHT - 2, ROW_HOVER);
+            gfx.text(font, describe(results.get(i)), width / 2 - 150, y, hovered ? TEXT_PRIMARY : TEXT_NORMAL);
         }
 
         gfx.text(font, Component.literal(String.format("%d result(s)%s", results.size(),
                         results.size() > rows ? "  -  scroll for more" : ""))
-                .withStyle(ChatFormatting.DARK_GRAY), width / 2 - 150, height - 16, 0x888888);
+                .withStyle(ChatFormatting.DARK_GRAY), width / 2 - 150, height - 16, TEXT_FAINT);
     }
 
     private Component describe(SearchResult result) {
