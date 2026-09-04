@@ -2,6 +2,7 @@ package dev.adrian.chesttracker.client.highlight;
 
 import dev.adrian.chesttracker.client.platform.ClientCompat;
 import dev.adrian.chesttracker.config.ChestTrackerConfig;
+import dev.adrian.chesttracker.core.highlight.HighlightTargets;
 import dev.adrian.chesttracker.core.highlight.HighlightTimer;
 import dev.adrian.chesttracker.core.util.BlockKey;
 import net.minecraft.ChatFormatting;
@@ -183,16 +184,8 @@ public final class ContainerHighlight {
      * the player past it.
      */
     private long nearestTo(LocalPlayer player) {
-        long best = targets.get(0);
-        double bestDistance = distanceTo(player, best);
-        for (int i = 1; i < targets.size(); i++) {
-            double distance = distanceTo(player, targets.get(i));
-            if (distance < bestDistance) {
-                bestDistance = distance;
-                best = targets.get(i);
-            }
-        }
-        return best;
+        return HighlightTargets.nearest(targets,
+                player.getBlockX(), player.getBlockY(), player.getBlockZ());
     }
 
     private double distanceTo(LocalPlayer player, long pos) {
