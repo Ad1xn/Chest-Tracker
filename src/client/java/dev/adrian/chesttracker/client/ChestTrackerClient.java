@@ -27,7 +27,7 @@ public final class ChestTrackerClient implements ClientModInitializer {
 
         // GRAVE matches the muscle memory of the mod this replaces.
         openSearch = ClientCompat.registerKeyMapping(new KeyMapping(
-                "key.chestindex.search",
+                "key.chest-tracker.search",
                 InputConstants.Type.KEYSYM,
                 GLFW.GLFW_KEY_GRAVE_ACCENT,
                 // Categories became a record of an Identifier; INVENTORY is where
@@ -38,7 +38,7 @@ public final class ChestTrackerClient implements ClientModInitializer {
         // is on the mouse, which is the posture this is used in: cursor over a
         // stack in a chest, asking where the rest of it is.
         searchHovered = ClientCompat.registerKeyMapping(new KeyMapping(
-                "key.chestindex.search_hovered",
+                "key.chest-tracker.search_hovered",
                 InputConstants.Type.KEYSYM,
                 GLFW.GLFW_KEY_Z,
                 KeyMapping.Category.INVENTORY));

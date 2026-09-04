@@ -45,7 +45,7 @@ export JAVA_HOME=$(/usr/libexec/java_home -v 26)   # MUST be JDK 25+
 toolchain; the 26.2 target fails outright otherwise. Foojay toolchain provisioning does *not* fix
 this. This machine has JDK 21/22/26 but no 25 — 26 works fine.
 
-Jars land in `versions/<mc>/build/libs/chestindex-<mc>-0.1.0+<mc>.jar`.
+Jars land in `versions/<mc>/build/libs/chest-tracker-<mc>-0.1.0+<mc>.jar`.
 
 ### Non-obvious build facts (each cost real time — do not "simplify" them away)
 
@@ -66,10 +66,22 @@ Jars land in `versions/<mc>/build/libs/chestindex-<mc>-0.1.0+<mc>.jar`.
   templated through `processResources` to match. Compiling everything at 21 was tidier but makes a
   target unable to consume a Java 25 dependency — Gradle's variant matching rejects it, which is
   what Mod Menu 20 hit.
-- Mod id is **`chestindex`**, display name "ChestTracker". The id must not be `chesttracker`: it
-  collides with the original mod (NoRiskClient injects it from `meta/mod_cache/`), Fabric resolves
-  duplicate ids by picking one, and ours silently never loaded. `fabric.mod.json` declares
-  `"breaks": {"chesttracker": "*"}`.
+- Mod id is **`chest-tracker`**, display name "ChestTracker". **The hyphen is load-bearing.** The id
+  must not be `chesttracker`: that collides with the original mod (NoRiskClient injects it from
+  `meta/mod_cache/`), Fabric resolves duplicate ids by picking one, and ours silently never loaded.
+  `chest-tracker` is a different string, so it does not collide, and hyphens are legal in a Fabric
+  id (`^[a-z][a-z0-9-_]{1,63}$`), in a resource namespace, and in a lang key — all three of which
+  the id feeds. It was `chestindex` until the rename; anything still saying `chestindex` is stale.
+- **A hyphen is not legal in a Java identifier**, so mixin member prefixes are `chesttracker$`, not
+  the mod id. They only have to be unique, not to match the id.
+- `fabric.mod.json` still declares `"breaks": {"chesttracker": "*"}`. That predates the rename and is
+  now doing something different from what it was added for: with distinct ids the two mods could
+  coexist, and instead this makes Fabric refuse to launch when the original is present — which is
+  exactly what NoRiskClient injecting it would do. Worth revisiting.
+- Renaming the id moved three things players own: `config/chestindex.json` → `config/chest-tracker.json`
+  (settings fall back to defaults), the per-world index at `data/chestindex/` → `data/chest-tracker/`
+  (the world is simply re-scanned), and the payload namespace, so a renamed client and an old server
+  do not recognise each other.
 
 ---
 
@@ -174,7 +186,7 @@ return contents.stream();
 - **Commands**: `/chesttracker scanworld [cancel]`, `scan`, `stats`, `find` (op-gated).
 - **Multiplayer**: the screen queries a server running the mod, permission-gated, and falls back
   cleanly on a vanilla server. See the Phase 7 section for what is and is not verified.
-- **Config screen** via Mod Menu (optional) and `config/chestindex.json`.
+- **Config screen** via Mod Menu (optional) and `config/chest-tracker.json`.
 - Keybind: `` ` `` — appears in vanilla Controls under Inventory as "Search containers".
 
 ---

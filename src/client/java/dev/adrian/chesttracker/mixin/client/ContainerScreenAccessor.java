@@ -21,15 +21,15 @@ public interface ContainerScreenAccessor {
 
     /** The slot under the cursor, or null. Vanilla keeps this up to date itself. */
     @Accessor("hoveredSlot")
-    Slot chestindex$hoveredSlot();
+    Slot chesttracker$hoveredSlot();
 
     @Accessor("leftPos")
-    int chestindex$leftPos();
+    int chesttracker$leftPos();
 
     @Accessor("topPos")
-    int chestindex$topPos();
+    int chesttracker$topPos();
 
     /** The window's width, which is not 176 for every container in the game. */
     @Accessor("imageWidth")
-    int chestindex$imageWidth();
+    int chesttracker$imageWidth();
 }

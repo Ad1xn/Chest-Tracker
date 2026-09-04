@@ -35,8 +35,8 @@ public final class ContainerScreens {
 
             if (ChestTrackerConfig.get().containerSearchButton) {
                 ClientCompat.addWidget(screen, new SearchButton(
-                        access.chestindex$leftPos() + access.chestindex$imageWidth(),
-                        access.chestindex$topPos()));
+                        access.chesttracker$leftPos() + access.chesttracker$imageWidth(),
+                        access.chesttracker$topPos()));
             }
 
             ScreenKeyboardEvents.afterKeyPress(screen).register((ignored, keyEvent) -> {
@@ -45,7 +45,7 @@ public final class ContainerScreens {
                 // Requiring a hovered stack is also what keeps this from firing
                 // while somebody types a Z into an anvil or the creative search:
                 // the cursor cannot be over a slot and in a text field at once.
-                Slot hovered = access.chestindex$hoveredSlot();
+                Slot hovered = access.chesttracker$hoveredSlot();
                 if (hovered == null || !hovered.hasItem()) return;
 
                 ContainerSearch.findAndGuide(hovered.getItem());

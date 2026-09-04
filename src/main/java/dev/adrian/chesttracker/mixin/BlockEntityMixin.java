@@ -22,7 +22,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 public abstract class BlockEntityMixin {
 
     @Inject(method = "setChanged()V", at = @At("RETURN"))
-    private void chestindex$afterSetChanged(CallbackInfo ci) {
+    private void chesttracker$afterSetChanged(CallbackInfo ci) {
         Trackers.onContainerChanged((BlockEntity) (Object) this);
     }
 }

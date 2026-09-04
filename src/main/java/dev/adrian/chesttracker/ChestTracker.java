@@ -25,7 +25,7 @@ public final class ChestTracker implements ModInitializer {
     // The internal id must differ from the original Chest Tracker's, or Fabric
     // resolves the collision by id and this mod silently never loads. The
     // display name stays "ChestTracker"; only the id and its derived paths move.
-    public static final String MOD_ID = "chestindex";
+    public static final String MOD_ID = "chest-tracker";
     public static final Logger LOG = LoggerFactory.getLogger("ChestTracker");
 
     @Override
