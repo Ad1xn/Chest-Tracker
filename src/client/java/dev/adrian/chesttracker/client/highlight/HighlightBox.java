@@ -67,6 +67,25 @@ public final class HighlightBox {
         ring(pose, lines, x0, x1, y1, z0, z1, red, green, blue, alpha, lineWidth);
     }
 
+    /**
+     * One free-standing segment, for the line drawn towards a distant match.
+     *
+     * <p>Takes its normal from its own direction, like the box edges do.
+     */
+    public static void line(PoseStack.Pose pose, VertexConsumer lines,
+                            double ax, double ay, double az,
+                            double bx, double by, double bz,
+                            float red, float green, float blue, float alpha, float lineWidth) {
+        float dx = (float) (bx - ax);
+        float dy = (float) (by - ay);
+        float dz = (float) (bz - az);
+        float length = (float) Math.sqrt(dx * dx + dy * dy + dz * dz);
+        if (length < 1.0e-4f) return;
+
+        edge(pose, lines, (float) ax, (float) ay, (float) az, (float) bx, (float) by, (float) bz,
+                dx / length, dy / length, dz / length, red, green, blue, alpha, lineWidth);
+    }
+
     private static void ring(PoseStack.Pose pose, VertexConsumer lines,
                              float x0, float x1, float y, float z0, float z1,
                              float red, float green, float blue, float alpha, float lineWidth) {

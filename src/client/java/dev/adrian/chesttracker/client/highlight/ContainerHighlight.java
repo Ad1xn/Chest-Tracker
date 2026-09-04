@@ -10,6 +10,7 @@ import com.mojang.blaze3d.vertex.VertexConsumer;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.util.Mth;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.phys.Vec3;
 
@@ -52,6 +53,9 @@ public final class ContainerHighlight {
     private String dimensionId;
     private String label;
 
+    /** Counts down while the view is being turned towards the nearest match. */
+    private int turnTicksLeft;
+
     /** Beyond this there is nothing on screen to draw a box around anyway. */
     private static final double DRAW_RADIUS = 160.0;
 
@@ -93,6 +97,7 @@ public final class ContainerHighlight {
         LocalPlayer player = Minecraft.getInstance().player;
         double distance = player == null ? 0 : distanceTo(player);
         timer.start(distance, System.currentTimeMillis());
+        turnTicksLeft = ChestTrackerConfig.get().turnToTarget ? TURN_TICKS : 0;
     }
 
     public void clear() {
@@ -112,6 +117,18 @@ public final class ContainerHighlight {
 
     /** Past this the box would swallow the building it is in. */
     private static final double MAX_GROW = 3.0;
+
+    /** Below this the container is in plain sight and a line only clutters it. */
+    private static final double GUIDE_MIN_DISTANCE = 12.0;
+
+    /** Where the line starts, so it is not drawn inside the camera. */
+    private static final double GUIDE_START = 3.0;
+
+    /** Dropped below eye level, so it does not sit under the crosshair. */
+    private static final double GUIDE_DROP = 0.6;
+
+    /** Ticks spent turning to face a match, about a third of a second. */
+    private static final int TURN_TICKS = 7;
 
     private static final float BASE_LINE_WIDTH = 2.5f;
     private static final float LINE_WIDTH_PER_BLOCK = 0.06f;
@@ -134,6 +151,8 @@ public final class ContainerHighlight {
      * @param eye the camera position; boxes are drawn relative to it
      */
     public void drawBoxes(PoseStack.Pose pose, VertexConsumer lines, Vec3 eye) {
+        drawGuideLine(pose, lines, eye);
+
         int drawn = 0;
         for (Long position : positions) {
             if (drawn >= MAX_BOXES) break;
@@ -166,6 +185,59 @@ public final class ContainerHighlight {
                     0.9f, grow, width);
             drawn++;
         }
+    }
+
+    /**
+     * Eases the view round to face the nearest match.
+     *
+     * <p>Over a few ticks rather than in one frame: snapping the camera is
+     * disorienting, and a player who was already turning finds themselves
+     * fighting it. Short enough to be over before it feels like a fight.
+     */
+    private void turnTowards(LocalPlayer player) {
+        if (turnTicksLeft <= 0) return;
+
+        double dx = BlockKey.x(pos) + 0.5 - player.getX();
+        double dy = BlockKey.y(pos) + 0.5 - player.getEyeY();
+        double dz = BlockKey.z(pos) + 0.5 - player.getZ();
+
+        float wantYaw = (float) Math.toDegrees(Math.atan2(-dx, dz));
+        float wantPitch = (float) -Math.toDegrees(Math.atan2(dy, Math.sqrt(dx * dx + dz * dz)));
+
+        // Shortest way round, so facing 179 and wanting -179 turns two degrees
+        // rather than three hundred and fifty eight.
+        float yawGap = Mth.wrapDegrees(wantYaw - player.getYRot());
+        float pitchGap = wantPitch - player.getXRot();
+        float step = 1.0f / turnTicksLeft;
+
+        player.setYRot(player.getYRot() + yawGap * step);
+        player.setXRot(player.getXRot() + pitchGap * step);
+        turnTicksLeft--;
+    }
+
+    /**
+     * A line pointing at the nearest match, once it is far enough to want one.
+     *
+     * <p>Straight rather than walked: a real path would have to solve the same
+     * problem the player is about to solve by looking, and what is missing when
+     * the box is a speck on the horizon is "that way, and that far". It starts
+     * a few blocks out so it does not smear across the camera.
+     */
+    private void drawGuideLine(PoseStack.Pose pose, VertexConsumer lines, Vec3 eye) {
+        if (positions.isEmpty() || !ChestTrackerConfig.get().guideLine) return;
+
+        double tx = BlockKey.x(pos) + 0.5 - eye.x;
+        double ty = BlockKey.y(pos) + 0.5 - eye.y;
+        double tz = BlockKey.z(pos) + 0.5 - eye.z;
+
+        double length = Math.sqrt(tx * tx + ty * ty + tz * tz);
+        if (length < GUIDE_MIN_DISTANCE || length > DRAW_RADIUS) return;
+
+        double scale = GUIDE_START / length;
+        HighlightBox.line(pose, lines,
+                tx * scale, ty * scale - GUIDE_DROP, tz * scale,
+                tx, ty, tz,
+                1.0f, 0.82f, 0.2f, 0.65f, 3.0f);
     }
 
     /**
@@ -215,6 +287,7 @@ public final class ContainerHighlight {
         // Walking past one of them makes another the nearest; the arrow should
         // follow rather than keep pointing behind.
         followNearest(player);
+        turnTowards(player);
 
         double distance = distanceTo(player);
         if (!timer.update(distance, System.currentTimeMillis())) {

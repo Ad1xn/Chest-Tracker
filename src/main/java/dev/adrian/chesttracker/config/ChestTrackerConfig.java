@@ -210,6 +210,29 @@ public final class ChestTrackerConfig {
         return Display.parse(highlightDisplay);
     }
 
+    /**
+     * Open the best matching container when one is already within arm's reach.
+     *
+     * <p>Only ever a container the search just found, and only at normal reach:
+     * this sends the same interaction as right-clicking it, so a server applies
+     * the same distance check to it as to anything else. Out of reach it does
+     * nothing and the boxes do the work.
+     */
+    public boolean openInReach = true;
+
+    /**
+     * Turn to face the nearest match when a search lands.
+     *
+     * <p>Costs nothing on a vanilla server because there is no index to search
+     * there in the first place. Worth knowing before enabling it on a server
+     * you do not run: a client that moves the player's view is the shape of
+     * thing some anti-cheats look for, however innocent the reason.
+     */
+    public boolean turnToTarget = true;
+
+    /** Draw a line towards the nearest match once it is far enough to need one. */
+    public boolean guideLine = true;
+
     /** Seconds a highlight lasts while the player keeps making progress towards it. */
     public int highlightSeconds = 45;
 
