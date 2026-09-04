@@ -1,7 +1,9 @@
 package dev.adrian.chesttracker.client.platform;
 
 import net.minecraft.client.gui.Font;
+import net.minecraft.client.renderer.RenderPipelines;
 import net.minecraft.network.chat.Component;
+import net.minecraft.resources.Identifier;
 import net.minecraft.world.item.ItemStack;
 
 //? if >=26.1 {
@@ -29,6 +31,13 @@ import net.minecraft.client.gui.GuiGraphics;
  * other place that has to know is the single overridden entry point in
  * {@link dev.adrian.chesttracker.client.ui.ChestTrackerScreen}, because that is
  * a method signature and cannot be hidden behind a facade.
+ *
+ * <p>Note that {@code blit} is identical on both versions, so vanilla's own GUI
+ * textures can be drawn from one code path.
+ *
+ * <p>Inside the version-conditional blocks below, only {@code //} comments are
+ * used: the inactive branch is itself wrapped in a block comment, and a nested
+ * {@code *}{@code /} would close it early.
  */
 public final class Gfx {
 
@@ -62,6 +71,12 @@ public final class Gfx {
     public void disableScissor() {
         raw.disableScissor();
     }
+
+    // Draws part of a texture, so the panel and slots are vanilla's own art.
+    public void blit(Identifier texture, int x, int y, float u, float v,
+                     int width, int height, int textureWidth, int textureHeight) {
+        raw.blit(RenderPipelines.GUI_TEXTURED, texture, x, y, u, v, width, height, textureWidth, textureHeight);
+    }
     *///?} else {
     private final GuiGraphics raw;
 
@@ -91,6 +106,12 @@ public final class Gfx {
 
     public void disableScissor() {
         raw.disableScissor();
+    }
+
+    // Draws part of a texture, so the panel and slots are vanilla's own art.
+    public void blit(Identifier texture, int x, int y, float u, float v,
+                     int width, int height, int textureWidth, int textureHeight) {
+        raw.blit(RenderPipelines.GUI_TEXTURED, texture, x, y, u, v, width, height, textureWidth, textureHeight);
     }
     //?}
 }

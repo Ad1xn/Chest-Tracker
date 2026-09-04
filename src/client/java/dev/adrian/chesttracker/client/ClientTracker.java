@@ -3,6 +3,7 @@ package dev.adrian.chesttracker.client;
 import dev.adrian.chesttracker.core.index.IndexQuery;
 import dev.adrian.chesttracker.core.index.SearchResult;
 import dev.adrian.chesttracker.core.index.WorldIndex;
+import dev.adrian.chesttracker.core.model.Origin;
 import dev.adrian.chesttracker.core.util.BlockKey;
 import dev.adrian.chesttracker.server.TrackerService;
 import dev.adrian.chesttracker.server.Trackers;
@@ -91,8 +92,45 @@ public final class ClientTracker {
         return matches;
     }
 
+    /**
+     * What the toolbar buttons control.
+     *
+     * @param includeNested   count items inside shulker boxes
+     * @param includeMachines include hoppers, furnaces and the like
+     * @param origins         empty means every origin
+     */
+    public record Filters(boolean includeNested, boolean includeMachines, Set<Origin> origins) {
+        public static Filters defaults() {
+            return new Filters(true, false, Set.of());
+        }
+    }
+
+    /** Block entity types whose contents churn constantly and are rarely searched for. */
+    private static final Set<String> MACHINES = Set.of(
+            "minecraft:hopper", "minecraft:dropper", "minecraft:dispenser",
+            "minecraft:furnace", "minecraft:blast_furnace", "minecraft:smoker",
+            "minecraft:brewing_stand", "minecraft:crafter", "minecraft:campfire",
+            "minecraft:jukebox", "minecraft:lectern", "minecraft:decorated_pot",
+            "minecraft:chiseled_bookshelf");
+
+    private static Set<Integer> machineTypeIds(TrackerService tracker) {
+        Set<Integer> ids = new HashSet<>();
+        List<String> entries = tracker.palette().entries();
+        for (int id = 0; id < entries.size(); id++) {
+            if (MACHINES.contains(entries.get(id))) ids.add(id);
+        }
+        return ids;
+    }
+
+    private static void applyFilters(IndexQuery.Builder builder, Filters filters, TrackerService tracker) {
+        builder.includeNested(filters.includeNested());
+        if (!filters.origins().isEmpty()) builder.origins(filters.origins());
+        if (!filters.includeMachines()) builder.excludeTypes(machineTypeIds(tracker));
+    }
+
     /** Totals every indexed item, for the item-first list. */
-    public static CompletableFuture<List<WorldIndex.ItemSummary>> summarise(String query, int limit) {
+    public static CompletableFuture<List<WorldIndex.ItemSummary>> summarise(
+            String query, Filters filters, int limit) {
         Minecraft client = Minecraft.getInstance();
         IntegratedServer server = client.getSingleplayerServer();
         LocalPlayer player = client.player;
@@ -107,6 +145,7 @@ public final class ClientTracker {
             if (tracker == null) return List.<WorldIndex.ItemSummary>of();
 
             IndexQuery.Builder builder = IndexQuery.builder().center(centre);
+            applyFilters(builder, filters, tracker);
             if (!needle.isEmpty()) {
                 Set<Integer> itemIds = matchingItemIds(tracker, needle);
                 if (itemIds.isEmpty()) return List.<WorldIndex.ItemSummary>of();
@@ -119,11 +158,11 @@ public final class ClientTracker {
     }
 
     /** The containers holding one item, nearest first. */
-    public static CompletableFuture<List<SearchResult>> containersFor(int itemId, int limit) {
-        return search(itemId, limit);
+    public static CompletableFuture<List<SearchResult>> containersFor(int itemId, Filters filters, int limit) {
+        return search(itemId, filters, limit);
     }
 
-    private static CompletableFuture<List<SearchResult>> search(int itemId, int limit) {
+    private static CompletableFuture<List<SearchResult>> search(int itemId, Filters filters, int limit) {
         Minecraft client = Minecraft.getInstance();
         IntegratedServer server = client.getSingleplayerServer();
         LocalPlayer player = client.player;
@@ -136,7 +175,9 @@ public final class ClientTracker {
             TrackerService tracker = Trackers.current();
             if (tracker == null) return List.<SearchResult>of();
 
-            IndexQuery query = IndexQuery.builder().item(itemId).center(centre).limit(limit).build();
+            IndexQuery.Builder builder = IndexQuery.builder().item(itemId).center(centre).limit(limit);
+            applyFilters(builder, filters, tracker);
+            IndexQuery query = builder.build();
 
             // Re-read anything loaded before showing it, so the detail pane is
             // never stale for containers the game has in memory right now.

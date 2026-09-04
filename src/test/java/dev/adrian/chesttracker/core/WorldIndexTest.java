@@ -205,6 +205,20 @@ class WorldIndexTest {
     }
 
     @Test
+    void excludesContainerTypesWhenAsked() {
+        index.put(new ContainerRecord(BlockKey.pack(0, 64, 0), 0, CHEST, Origin.UNKNOWN,
+                null, false, true, null, 0L, List.of(new StackEntry(DIAMOND, 1))));
+        index.put(new ContainerRecord(BlockKey.pack(10, 64, 0), 0, BARREL, Origin.UNKNOWN,
+                null, false, true, null, 0L, List.of(new StackEntry(DIAMOND, 1))));
+
+        List<SearchResult> withoutBarrels = index.query(IndexQuery.builder()
+                .item(DIAMOND).excludeTypes(Set.of(BARREL)).build());
+
+        assertEquals(1, withoutBarrels.size());
+        assertEquals(CHEST, withoutBarrels.get(0).container().typeId());
+    }
+
+    @Test
     void excludesNestedHitsWhenAsked() {
         // A diamond inside a shulker box inside this chest.
         index.put(chest(0, 64, 0, new StackEntry(DIAMOND, 1, 1)));

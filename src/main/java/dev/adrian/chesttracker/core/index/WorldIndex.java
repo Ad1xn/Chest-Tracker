@@ -232,6 +232,7 @@ public final class WorldIndex {
     private boolean matchesFilters(ContainerRecord record, IndexQuery query) {
         if (!query.origins().isEmpty() && !query.origins().contains(record.origin())) return false;
         if (!query.typeIds().isEmpty() && !query.typeIds().contains(record.typeId())) return false;
+        if (query.excludedTypeIds().contains(record.typeId())) return false;
         if (query.unlootedOnly() && !record.unlooted()) return false;
         if (query.knownContentsOnly() && !record.contentsKnown()) return false;
         return true;

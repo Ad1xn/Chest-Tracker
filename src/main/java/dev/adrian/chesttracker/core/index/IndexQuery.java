@@ -11,6 +11,11 @@ import java.util.Set;
  * @param itemIds           palette ids to look for; empty matches any item
  * @param origins           natural / player-placed / unknown; empty matches any
  * @param typeIds           container type palette ids; empty matches any
+ * @param excludedTypeIds   container types to leave out, applied after
+ *                          {@code typeIds}. Inclusive filtering cannot express
+ *                          "everything except machines" without listing every
+ *                          other type, which the caller has no reliable way to
+ *                          enumerate
  * @param unlootedOnly      only generated containers nobody has opened
  * @param knownContentsOnly drop location-only entries whose contents we cannot
  *                          know (the vanilla-server case)
@@ -23,6 +28,7 @@ public record IndexQuery(
         Set<Integer> itemIds,
         Set<Origin> origins,
         Set<Integer> typeIds,
+        Set<Integer> excludedTypeIds,
         boolean unlootedOnly,
         boolean knownContentsOnly,
         boolean includeNested,
@@ -35,6 +41,7 @@ public record IndexQuery(
         itemIds = itemIds == null ? Set.of() : Set.copyOf(itemIds);
         origins = origins == null ? Set.of() : Set.copyOf(origins);
         typeIds = typeIds == null ? Set.of() : Set.copyOf(typeIds);
+        excludedTypeIds = excludedTypeIds == null ? Set.of() : Set.copyOf(excludedTypeIds);
     }
 
     public boolean hasDistanceLimit() {
@@ -53,6 +60,7 @@ public record IndexQuery(
         private Set<Integer> itemIds = Set.of();
         private Set<Origin> origins = Set.of();
         private Set<Integer> typeIds = Set.of();
+        private Set<Integer> excludedTypeIds = Set.of();
         private boolean unlootedOnly;
         private boolean knownContentsOnly;
         private boolean includeNested = true;
@@ -65,6 +73,7 @@ public record IndexQuery(
         public Builder origins(Set<Origin> o) { this.origins = o; return this; }
         public Builder origin(Origin o) { this.origins = Set.of(o); return this; }
         public Builder types(Set<Integer> ids) { this.typeIds = ids; return this; }
+        public Builder excludeTypes(Set<Integer> ids) { this.excludedTypeIds = ids; return this; }
         public Builder unlootedOnly(boolean v) { this.unlootedOnly = v; return this; }
         public Builder knownContentsOnly(boolean v) { this.knownContentsOnly = v; return this; }
         public Builder includeNested(boolean v) { this.includeNested = v; return this; }
@@ -73,7 +82,7 @@ public record IndexQuery(
         public Builder limit(int n) { this.limit = n; return this; }
 
         public IndexQuery build() {
-            return new IndexQuery(itemIds, origins, typeIds, unlootedOnly,
+            return new IndexQuery(itemIds, origins, typeIds, excludedTypeIds, unlootedOnly,
                     knownContentsOnly, includeNested, center, maxDistance, limit);
         }
     }

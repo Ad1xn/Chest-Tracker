@@ -16,9 +16,12 @@ import net.minecraft.resources.Identifier;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 //? if >=26.1 {
 /*import net.minecraft.client.gui.GuiGraphicsExtractor;
@@ -27,47 +30,69 @@ import net.minecraft.client.gui.GuiGraphics;
 //?}
 
 /**
- * A container-shaped view of everything you own.
+ * A chest-shaped view of everything you own.
  *
- * <p>Laid out like a vanilla chest - nine slots per row, item icons with stack
- * counts - because that is the shape players already read fluently, and because
- * a one-item-per-row list means scrolling forever once a world has a few hundred
- * distinct items. Nine across turns that into a glance.
+ * <p>Drawn with vanilla's own {@code generic_54} container texture rather than
+ * an imitation of it, so the window sits alongside a real chest GUI instead of
+ * looking like a mod pasted over the game. Nine slots across and six rows down,
+ * a search field, a scrollbar, and a row of filter buttons.
  *
- * <p>Two views in one window: the grid of items, and, once you click one, the
- * containers holding it. Clicking a location closes the screen and hands over to
- * guidance, because the player is about to walk there.
+ * <p>Nine across matters: one item per row means scrolling forever once a world
+ * has a few hundred distinct items, whereas a grid turns that into a glance.
+ *
+ * <p>Two views share the window - the item grid, and the containers holding a
+ * chosen item. Clicking a location closes the screen and hands over to guidance,
+ * because the player is about to walk there.
  */
 public final class ChestTrackerScreen extends Screen {
 
-    // Vanilla container palette, so this sits alongside a real chest GUI rather
-    // than looking like a mod window pasted on top.
+    private static final Identifier CONTAINER_TEXTURE =
+            Identifier.parse("minecraft:textures/gui/container/generic_54.png");
+
+    // Geometry of generic_54.png: a 176x222 window on a 256x256 sheet.
+    private static final int SHEET = 256;
+    private static final int GUI_W = 176;
+    private static final int TOP_H = 17;          // top border and title row
+    private static final int ROWS_V = 17;         // where the six slot rows start
+    private static final int ROWS_H = 108;        // six rows of 18px
+    private static final int BOTTOM_V = 215;      // bottom border in the sheet
+    private static final int BOTTOM_H = 7;
+    private static final int SLOTS_W = 169;       // left border plus nine slots
+    private static final int SCROLL_COL = 14;     // widened for the scrollbar
+
+    private static final int COLS = 9;
+    private static final int ROWS = 6;
+    private static final int SLOT = 18;
+    private static final int SEARCH_H = 16;
+
+    // Vanilla's container palette, for the parts drawn rather than blitted.
     private static final int PANEL_FILL = 0xFFC6C6C6;
     private static final int BEVEL_LIGHT = 0xFFFFFFFF;
     private static final int BEVEL_DARK = 0xFF555555;
-    private static final int BORDER = 0xFF000000;
-    private static final int SLOT_FILL = 0xFF8B8B8B;
-    private static final int SLOT_DARK = 0xFF373737;
-    private static final int TEXT_TITLE = 0xFF404040;
-    private static final int TEXT_BODY = 0xFF404040;
+    private static final int GROOVE = 0xFF8B8B8B;
+    private static final int GROOVE_DARK = 0xFF373737;
+    private static final int TEXT_DARK = 0xFF404040;
     private static final int TEXT_LIGHT = 0xFFFFFFFF;
     private static final int SLOT_HOVER = 0x80FFFFFF;
-    private static final int SLOT_SELECTED = 0x80FFCC44;
     private static final int ROW_HOVER = 0x40000000;
+    private static final int BUTTON_ON = 0xFF6A9A4A;
 
-    private static final int COLS = 9;
-    private static final int SLOT = 18;
-    private static final int PADDING = 7;
-    private static final int TITLE_H = 13;
-    private static final int SEARCH_H = 14;
-    private static final int FOOTER_H = 12;
-    private static final int DETAIL_ROW = 11;
-
-    private static final int MAX_ITEMS = 600;
+    private static final int MAX_ITEMS = 900;
     private static final int MAX_CONTAINERS = 64;
+    private static final int DETAIL_ROW = 11;
 
     /** Registry lookups are not free and slots redraw every frame. */
     private static final Map<Integer, ItemStack> ICON_CACHE = new HashMap<>();
+
+    private enum Sort {
+        COUNT("Most"), NEAREST("Nearest"), NAME("A-Z");
+
+        final String label;
+
+        Sort(String label) {
+            this.label = label;
+        }
+    }
 
     private EditBox search;
     private String pending = "";
@@ -76,32 +101,34 @@ public final class ChestTrackerScreen extends Screen {
     private List<SearchResult> containers = List.of();
     private int selectedItemId = -1;
     private int scrollRow;
+    private boolean draggingScrollbar;
     private boolean unavailable;
+
+    private Sort sort = Sort.COUNT;
+    private boolean includeNested = true;
+    private boolean includeMachines;
+    private int originIndex;   // 0 all, 1 player-placed, 2 natural
 
     private int panelX;
     private int panelY;
     private int panelW;
     private int panelH;
-    private int rows;
+
+    private String hoverLabel;
 
     public ChestTrackerScreen() {
-        super(Component.literal("ChestTracker"));
+        super(Component.literal("Chest Tracker"));
     }
 
     @Override
     protected void init() {
-        int gridW = COLS * SLOT;
-        panelW = gridW + PADDING * 2;
-
-        int available = height - 80 - TITLE_H - SEARCH_H - FOOTER_H - PADDING * 2;
-        rows = Math.max(3, Math.min(9, available / SLOT));
-        panelH = TITLE_H + SEARCH_H + rows * SLOT + FOOTER_H + PADDING * 2;
-
+        panelW = GUI_W + SCROLL_COL;
+        panelH = TOP_H + SEARCH_H + ROWS_H + BOTTOM_H;
         panelX = (width - panelW) / 2;
         panelY = (height - panelH) / 2;
 
-        search = new EditBox(font, panelX + PADDING + 1, panelY + PADDING + TITLE_H,
-                gridW - 2, SEARCH_H - 2, Component.literal("Search"));
+        search = new EditBox(font, panelX + 8, panelY + TOP_H + 3, SLOTS_W - 10, 12,
+                Component.literal("Search"));
         search.setMaxLength(64);
         search.setHint(Component.literal("Search"));
         search.setResponder(value -> {
@@ -115,24 +142,47 @@ public final class ChestTrackerScreen extends Screen {
         refreshItems();
     }
 
+    // --- data --------------------------------------------------------------
+
+    private ClientTracker.Filters filters() {
+        Set<Origin> origins = switch (originIndex) {
+            case 1 -> Set.of(Origin.PLAYER_PLACED);
+            case 2 -> Set.of(Origin.NATURAL);
+            default -> Set.of();
+        };
+        return new ClientTracker.Filters(includeNested, includeMachines, origins);
+    }
+
     private void refreshItems() {
         if (unavailable) return;
         String requested = pending;
-        ClientTracker.summarise(requested, MAX_ITEMS).thenAccept(found -> minecraft.execute(() -> {
-            // A slow earlier query must not overwrite a newer one's results.
-            if (!requested.equals(pending)) return;
-            items = found;
-            scrollRow = 0;
-            back();
-        }));
+        ClientTracker.summarise(requested, filters(), MAX_ITEMS).thenAccept(found ->
+                minecraft.execute(() -> {
+                    // A slow earlier query must not overwrite a newer one's results.
+                    if (!requested.equals(pending)) return;
+                    items = sorted(found);
+                    scrollRow = 0;
+                    back();
+                }));
+    }
+
+    private List<WorldIndex.ItemSummary> sorted(List<WorldIndex.ItemSummary> source) {
+        List<WorldIndex.ItemSummary> copy = new ArrayList<>(source);
+        switch (sort) {
+            case NEAREST -> copy.sort(Comparator.comparingDouble(WorldIndex.ItemSummary::nearestDistSq));
+            case NAME -> copy.sort(Comparator.comparing(entry -> displayName(entry.itemId())));
+            case COUNT -> { /* summarise already returns most-plentiful first */ }
+        }
+        return copy;
     }
 
     private void selectItem(int itemId) {
         selectedItemId = itemId;
         containers = List.of();
-        ClientTracker.containersFor(itemId, MAX_CONTAINERS).thenAccept(found -> minecraft.execute(() -> {
-            if (selectedItemId == itemId) containers = found;
-        }));
+        ClientTracker.containersFor(itemId, filters(), MAX_CONTAINERS).thenAccept(found ->
+                minecraft.execute(() -> {
+                    if (selectedItemId == itemId) containers = found;
+                }));
     }
 
     private void back() {
@@ -143,109 +193,122 @@ public final class ChestTrackerScreen extends Screen {
     // --- geometry ----------------------------------------------------------
 
     private int gridX() {
-        return panelX + PADDING;
+        return panelX + 8;
     }
 
     private int gridY() {
-        return panelY + PADDING + TITLE_H + SEARCH_H;
+        return panelY + TOP_H + SEARCH_H + 1;
+    }
+
+    private int scrollbarX() {
+        return panelX + SLOTS_W + 3;
     }
 
     private int maxScrollRow() {
-        int totalRows = (items.size() + COLS - 1) / COLS;
-        return Math.max(0, totalRows - rows);
+        return Math.max(0, (items.size() + COLS - 1) / COLS - ROWS);
     }
 
-    /** Index into {@link #items} for a mouse position, or -1. */
     private int slotAt(int mouseX, int mouseY) {
         int col = (mouseX - gridX()) / SLOT;
         int row = (mouseY - gridY()) / SLOT;
-        if (mouseX < gridX() || mouseY < gridY() || col < 0 || col >= COLS || row < 0 || row >= rows) return -1;
+        if (mouseX < gridX() || mouseY < gridY() || col < 0 || col >= COLS || row < 0 || row >= ROWS) return -1;
         int index = (scrollRow + row) * COLS + col;
         return index < items.size() ? index : -1;
     }
 
     // --- drawing -----------------------------------------------------------
 
-    private void drawPanel(Gfx gfx, int x, int y, int w, int h) {
-        gfx.fill(x - 1, y - 1, x + w + 1, y + h + 1, BORDER);
-        gfx.fill(x, y, x + w, y + h, PANEL_FILL);
-        // Vanilla's raised bevel: light on the top and left, dark on the rest.
-        gfx.fill(x, y, x + w, y + 1, BEVEL_LIGHT);
-        gfx.fill(x, y, x + 1, y + h, BEVEL_LIGHT);
-        gfx.fill(x, y + h - 1, x + w, y + h, BEVEL_DARK);
-        gfx.fill(x + w - 1, y, x + w, y + h, BEVEL_DARK);
-    }
-
-    private void drawSlot(Gfx gfx, int x, int y) {
-        // Inset: the inverse bevel of the panel, which is what reads as a socket.
-        gfx.fill(x, y, x + SLOT - 1, y + SLOT - 1, SLOT_DARK);
-        gfx.fill(x + 1, y + 1, x + SLOT - 1, y + SLOT - 1, SLOT_FILL);
-        gfx.fill(x + 1, y + SLOT - 2, x + SLOT - 1, y + SLOT - 1, BEVEL_LIGHT);
-        gfx.fill(x + SLOT - 2, y + 1, x + SLOT - 1, y + SLOT - 1, BEVEL_LIGHT);
-    }
-
     private void draw(Gfx gfx, int mouseX, int mouseY) {
-        drawPanel(gfx, panelX, panelY, panelW, panelH);
-        gfx.text(font, Component.literal(selectedItemId < 0 ? "Chest Tracker" : displayName(selectedItemId)),
-                panelX + PADDING, panelY + PADDING, TEXT_TITLE);
+        hoverLabel = null;
+        drawWindow(gfx);
+        drawButtons(gfx, mouseX, mouseY);
 
         if (unavailable) {
-            gfx.text(font, Component.literal("No index here yet."), gridX(), gridY(), TEXT_BODY);
+            gfx.text(font, Component.literal("No index here yet."), gridX(), gridY() + 4, TEXT_DARK);
             return;
         }
 
         if (selectedItemId < 0) {
             drawGrid(gfx, mouseX, mouseY);
+            drawScrollbar(gfx);
         } else {
             drawLocations(gfx, mouseX, mouseY);
         }
+
+        String title = hoverLabel != null ? hoverLabel
+                : selectedItemId >= 0 ? displayName(selectedItemId) : "Chest Tracker";
+        gfx.text(font, Component.literal(title), panelX + 8, panelY + 6, TEXT_DARK);
+    }
+
+    /**
+     * Blits vanilla's chest window, widened by a scrollbar column.
+     *
+     * <p>The top and bottom borders are uniform horizontal bands, so a second
+     * right-aligned copy overlaps the first seamlessly. The slot rows are not,
+     * so those are drawn as left-plus-slots, a flat filler, and the right border.
+     */
+    private void drawWindow(Gfx gfx) {
+        int rightX = panelX + panelW - GUI_W;
+        int searchY = panelY + TOP_H;
+        int gridTop = searchY + SEARCH_H;
+        int bottomY = gridTop + ROWS_H;
+
+        gfx.blit(CONTAINER_TEXTURE, panelX, panelY, 0, 0, GUI_W, TOP_H, SHEET, SHEET);
+        gfx.blit(CONTAINER_TEXTURE, rightX, panelY, 0, 0, GUI_W, TOP_H, SHEET, SHEET);
+
+        // Search strip: flat body with the side borders carried through.
+        gfx.fill(panelX, searchY, panelX + panelW, searchY + SEARCH_H, PANEL_FILL);
+        gfx.blit(CONTAINER_TEXTURE, panelX, searchY, 0, 30, 7, SEARCH_H, SHEET, SHEET);
+        gfx.blit(CONTAINER_TEXTURE, panelX + panelW - 7, searchY, GUI_W - 7, 30, 7, SEARCH_H, SHEET, SHEET);
+        drawGroove(gfx, panelX + 7, searchY + 2, SLOTS_W - 8, 12);
+
+        gfx.blit(CONTAINER_TEXTURE, panelX, gridTop, 0, ROWS_V, SLOTS_W, ROWS_H, SHEET, SHEET);
+        gfx.fill(panelX + SLOTS_W, gridTop, panelX + panelW - 7, gridTop + ROWS_H, PANEL_FILL);
+        gfx.blit(CONTAINER_TEXTURE, panelX + panelW - 7, gridTop, GUI_W - 7, ROWS_V, 7, ROWS_H, SHEET, SHEET);
+
+        gfx.blit(CONTAINER_TEXTURE, panelX, bottomY, 0, BOTTOM_V, GUI_W, BOTTOM_H, SHEET, SHEET);
+        gfx.blit(CONTAINER_TEXTURE, rightX, bottomY, 0, BOTTOM_V, GUI_W, BOTTOM_H, SHEET, SHEET);
+    }
+
+    /** The inset used by vanilla for slots and text fields. */
+    private void drawGroove(Gfx gfx, int x, int y, int w, int h) {
+        gfx.fill(x, y, x + w, y + h, GROOVE_DARK);
+        gfx.fill(x + 1, y + 1, x + w, y + h, BEVEL_LIGHT);
+        gfx.fill(x + 1, y + 1, x + w - 1, y + h - 1, GROOVE);
     }
 
     private void drawGrid(Gfx gfx, int mouseX, int mouseY) {
         int hovered = slotAt(mouseX, mouseY);
 
-        for (int row = 0; row < rows; row++) {
+        for (int row = 0; row < ROWS; row++) {
             for (int col = 0; col < COLS; col++) {
-                int x = gridX() + col * SLOT;
-                int y = gridY() + row * SLOT;
-                drawSlot(gfx, x, y);
-
                 int index = (scrollRow + row) * COLS + col;
                 if (index >= items.size()) continue;
 
+                int x = gridX() + col * SLOT;
+                int y = gridY() + row * SLOT;
                 WorldIndex.ItemSummary summary = items.get(index);
-                gfx.item(iconFor(summary.itemId()), x + 1, y + 1);
-                drawCount(gfx, summary.totalCount(), x, y);
 
-                if (index == hovered) {
-                    gfx.fill(x + 1, y + 1, x + SLOT - 1, y + SLOT - 1, SLOT_HOVER);
-                }
+                gfx.item(iconFor(summary.itemId()), x, y);
+                drawCount(gfx, summary.totalCount(), x, y);
+                if (index == hovered) gfx.fill(x, y, x + 16, y + 16, SLOT_HOVER);
             }
         }
 
-        int footerY = panelY + panelH - PADDING - FOOTER_H + 3;
         if (hovered >= 0) {
             WorldIndex.ItemSummary summary = items.get(hovered);
-            gfx.text(font, Component.literal(String.format("%s  -  %,d in %d",
-                            displayName(summary.itemId()), summary.totalCount(), summary.containerCount())),
-                    panelX + PADDING, footerY, TEXT_BODY);
+            hoverLabel = String.format("%s  %,d in %d",
+                    displayName(summary.itemId()), summary.totalCount(), summary.containerCount());
         } else if (items.isEmpty()) {
-            gfx.text(font, Component.literal(pending.isBlank()
-                            ? "Nothing indexed yet"
-                            : "No match"),
-                    panelX + PADDING, footerY, TEXT_BODY);
-        } else {
-            gfx.text(font, Component.literal(items.size() + " items"
-                            + (maxScrollRow() > 0 ? "  -  scroll" : "")),
-                    panelX + PADDING, footerY, TEXT_BODY);
+            gfx.text(font, Component.literal(pending.isBlank() ? "Nothing indexed yet" : "No match"),
+                    gridX(), gridY() + 4, TEXT_DARK);
         }
     }
 
     /** Stack counts sit bottom-right of the slot, light on dark, as in vanilla. */
     private void drawCount(Gfx gfx, int count, int slotX, int slotY) {
         String label = abbreviate(count);
-        int textWidth = font.width(label);
-        gfx.text(font, label, slotX + SLOT - 2 - textWidth, slotY + SLOT - 9, TEXT_LIGHT);
+        gfx.text(font, label, slotX + 17 - font.width(label), slotY + 9, TEXT_LIGHT);
     }
 
     private static String abbreviate(int count) {
@@ -254,27 +317,84 @@ public final class ChestTrackerScreen extends Screen {
         return (count / 1000) + "k";
     }
 
+    private void drawScrollbar(Gfx gfx) {
+        int x = scrollbarX();
+        int y = gridY() - 1;
+        int height = ROWS * SLOT;
+        drawGroove(gfx, x, y, 12, height);
+
+        int maxScroll = maxScrollRow();
+        int thumbHeight = maxScroll == 0 ? height - 2
+                : Math.max(15, (height - 2) * ROWS / ((items.size() + COLS - 1) / COLS));
+        int travel = height - 2 - thumbHeight;
+        int thumbY = y + 1 + (maxScroll == 0 ? 0 : travel * scrollRow / maxScroll);
+
+        gfx.fill(x + 1, thumbY, x + 11, thumbY + thumbHeight, PANEL_FILL);
+        gfx.fill(x + 1, thumbY, x + 11, thumbY + 1, BEVEL_LIGHT);
+        gfx.fill(x + 1, thumbY, x + 2, thumbY + thumbHeight, BEVEL_LIGHT);
+        gfx.fill(x + 1, thumbY + thumbHeight - 1, x + 11, thumbY + thumbHeight, BEVEL_DARK);
+        gfx.fill(x + 10, thumbY, x + 11, thumbY + thumbHeight, BEVEL_DARK);
+    }
+
+    private record Toolbar(String glyph, String label, boolean active) {}
+
+    private List<Toolbar> toolbar() {
+        String origin = switch (originIndex) {
+            case 1 -> "Player-placed only";
+            case 2 -> "Natural only";
+            default -> "All origins";
+        };
+        return List.of(
+                new Toolbar("S", "Sort: " + sort.label, sort != Sort.COUNT),
+                new Toolbar("O", origin, originIndex != 0),
+                new Toolbar("N", includeNested ? "Counting nested items" : "Ignoring nested items", includeNested),
+                new Toolbar("M", includeMachines ? "Showing machines" : "Hiding machines", includeMachines),
+                new Toolbar("X", "Close", false));
+    }
+
+    private int buttonX(int index) {
+        return panelX + panelW - 8 - (5 - index) * 13;
+    }
+
+    private void drawButtons(Gfx gfx, int mouseX, int mouseY) {
+        List<Toolbar> buttons = toolbar();
+        for (int i = 0; i < buttons.size(); i++) {
+            Toolbar button = buttons.get(i);
+            int x = buttonX(i);
+            int y = panelY + 3;
+            boolean hovered = mouseX >= x && mouseX < x + 12 && mouseY >= y && mouseY < y + 12;
+
+            gfx.fill(x, y, x + 12, y + 12, BEVEL_DARK);
+            gfx.fill(x, y, x + 11, y + 11, button.active() ? BUTTON_ON : PANEL_FILL);
+            gfx.fill(x, y, x + 11, y + 1, BEVEL_LIGHT);
+            gfx.fill(x, y, x + 1, y + 11, BEVEL_LIGHT);
+            if (hovered) {
+                gfx.fill(x + 1, y + 1, x + 11, y + 11, SLOT_HOVER);
+                hoverLabel = button.label();
+            }
+            gfx.text(font, button.glyph(), x + 3, y + 2, TEXT_DARK);
+        }
+    }
+
     private void drawLocations(Gfx gfx, int mouseX, int mouseY) {
         int x = gridX();
         int y = gridY();
-        int listBottom = gridY() + rows * SLOT;
+        int bottom = gridY() + ROWS * SLOT;
 
         if (containers.isEmpty()) {
-            gfx.text(font, Component.literal("Looking..."), x, y, TEXT_BODY);
+            gfx.text(font, Component.literal("Looking..."), x, y, TEXT_DARK);
             return;
         }
 
         for (SearchResult result : containers) {
-            if (y + DETAIL_ROW > listBottom) break;
-            boolean hovered = mouseX >= x && mouseX <= panelX + panelW - PADDING
+            if (y + DETAIL_ROW > bottom) break;
+            boolean hovered = mouseX >= x && mouseX <= panelX + panelW - 10
                     && mouseY >= y && mouseY < y + DETAIL_ROW;
-            if (hovered) gfx.fill(x - 1, y - 1, panelX + panelW - PADDING, y + DETAIL_ROW - 1, ROW_HOVER);
-            gfx.text(font, Component.literal(describe(result)), x, y, TEXT_BODY);
+            if (hovered) gfx.fill(x - 1, y - 1, panelX + panelW - 10, y + DETAIL_ROW - 1, ROW_HOVER);
+            gfx.text(font, Component.literal(describe(result)), x, y, TEXT_DARK);
             y += DETAIL_ROW;
         }
-
-        gfx.text(font, Component.literal("Click to be guided  -  right-click to go back"),
-                panelX + PADDING, panelY + panelH - PADDING - FOOTER_H + 3, TEXT_BODY);
+        hoverLabel = "Click to be guided  -  right-click to go back";
     }
 
     private String describe(SearchResult result) {
@@ -284,7 +404,6 @@ public final class ChestTrackerScreen extends Screen {
                 .append("  ").append(BlockKey.toString(result.container().pos()))
                 .append(String.format("  %.0fm", result.distance()));
         if (result.matches().stream().anyMatch(entry -> entry.isNested())) line.append(" *");
-        if (result.container().origin() == Origin.NATURAL) line.append(" (nat)");
         return line.toString();
     }
 
@@ -301,8 +420,7 @@ public final class ChestTrackerScreen extends Screen {
 
     private static String displayName(int paletteId) {
         ItemStack stack = iconFor(paletteId);
-        if (stack.isEmpty()) return shortName(ClientTracker.nameOf(paletteId));
-        return stack.getHoverName().getString();
+        return stack.isEmpty() ? shortName(ClientTracker.nameOf(paletteId)) : stack.getHoverName().getString();
     }
 
     private static String shortName(String registryId) {
@@ -314,9 +432,11 @@ public final class ChestTrackerScreen extends Screen {
 
     @Override
     public boolean mouseClicked(MouseButtonEvent event, boolean doubleClick) {
-        if (unavailable) return super.mouseClicked(event, doubleClick);
         int mouseX = (int) event.x();
         int mouseY = (int) event.y();
+
+        if (event.button() == 0 && clickButton(mouseX, mouseY)) return true;
+        if (unavailable) return super.mouseClicked(event, doubleClick);
 
         if (event.button() == 1 && selectedItemId >= 0) {
             back();
@@ -325,6 +445,12 @@ public final class ChestTrackerScreen extends Screen {
 
         if (event.button() == 0) {
             if (selectedItemId < 0) {
+                if (mouseX >= scrollbarX() && mouseX < scrollbarX() + 12
+                        && mouseY >= gridY() - 1 && mouseY < gridY() - 1 + ROWS * SLOT) {
+                    draggingScrollbar = true;
+                    dragScrollbar(mouseY);
+                    return true;
+                }
                 int index = slotAt(mouseX, mouseY);
                 if (index >= 0) {
                     selectItem(items.get(index).itemId());
@@ -339,6 +465,62 @@ public final class ChestTrackerScreen extends Screen {
             }
         }
         return super.mouseClicked(event, doubleClick);
+    }
+
+    private boolean clickButton(int mouseX, int mouseY) {
+        int y = panelY + 3;
+        if (mouseY < y || mouseY >= y + 12) return false;
+
+        for (int i = 0; i < 5; i++) {
+            int x = buttonX(i);
+            if (mouseX < x || mouseX >= x + 12) continue;
+
+            switch (i) {
+                case 0 -> {
+                    sort = Sort.values()[(sort.ordinal() + 1) % Sort.values().length];
+                    items = sorted(items);
+                    scrollRow = 0;
+                }
+                case 1 -> {
+                    originIndex = (originIndex + 1) % 3;
+                    refreshItems();
+                }
+                case 2 -> {
+                    includeNested = !includeNested;
+                    refreshItems();
+                }
+                case 3 -> {
+                    includeMachines = !includeMachines;
+                    refreshItems();
+                }
+                default -> onClose();
+            }
+            return true;
+        }
+        return false;
+    }
+
+    private void dragScrollbar(int mouseY) {
+        int height = ROWS * SLOT;
+        int maxScroll = maxScrollRow();
+        if (maxScroll == 0) return;
+        double fraction = (mouseY - (gridY() - 1)) / (double) height;
+        scrollRow = Math.max(0, Math.min(maxScroll, (int) Math.round(fraction * maxScroll)));
+    }
+
+    @Override
+    public boolean mouseDragged(MouseButtonEvent event, double dragX, double dragY) {
+        if (draggingScrollbar) {
+            dragScrollbar((int) event.y());
+            return true;
+        }
+        return super.mouseDragged(event, dragX, dragY);
+    }
+
+    @Override
+    public boolean mouseReleased(MouseButtonEvent event) {
+        draggingScrollbar = false;
+        return super.mouseReleased(event);
     }
 
     private void guideTo(SearchResult result) {
