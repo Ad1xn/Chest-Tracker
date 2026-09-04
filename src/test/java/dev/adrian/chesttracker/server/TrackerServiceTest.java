@@ -110,6 +110,76 @@ class TrackerServiceTest {
         assertNotEquals(after, tracker.generation(DIM));
     }
 
+    private ContainerRecord placedBy(java.util.UUID owner, long tick, StackEntry... contents) {
+        return new ContainerRecord(POS, tracker.palette().intern(DIM),
+                tracker.palette().intern("minecraft:chest"),
+                Origin.PLAYER_PLACED, owner, false, true, null, tick, List.of(contents));
+    }
+
+    /** A fresh read: this is exactly what both scanners produce. */
+    private ContainerRecord observed(long tick, StackEntry... contents) {
+        return new ContainerRecord(POS, tracker.palette().intern(DIM),
+                tracker.palette().intern("minecraft:chest"),
+                Origin.UNKNOWN, null, false, true, null, tick, List.of(contents));
+    }
+
+    @Test
+    void aRereadDoesNotErasePlacementOrOwner() {
+        // The bug this pins down: put an item into a chest you just placed, the
+        // container is re-read, and the record comes back UNKNOWN with no owner
+        // - so the player-placed filter finds nothing and OWNED serves nobody.
+        java.util.UUID owner = java.util.UUID.randomUUID();
+        tracker.record(DIM, placedBy(owner, 1));
+
+        tracker.record(DIM, observed(2, new StackEntry(1, 5)));
+
+        ContainerRecord stored = tracker.index(DIM).get(POS);
+        assertEquals(Origin.PLAYER_PLACED, stored.origin());
+        assertEquals(owner, stored.owner());
+        assertEquals(1, stored.contents().size(), "the new contents must still be taken");
+    }
+
+    @Test
+    void anObservationStillEstablishesClassificationWhenNoneWasKnown() {
+        tracker.record(DIM, observed(1));
+        assertEquals(Origin.UNKNOWN, tracker.index(DIM).get(POS).origin());
+
+        // A natural chest seen for the first time.
+        tracker.record(DIM, new ContainerRecord(POS, tracker.palette().intern(DIM),
+                tracker.palette().intern("minecraft:chest"), Origin.NATURAL, null,
+                true, false, null, 2, List.of()));
+
+        assertEquals(Origin.NATURAL, tracker.index(DIM).get(POS).origin());
+    }
+
+    @Test
+    void openingAGeneratedChestStopsItBeingUnlooted() {
+        // unlooted is not inherited - the new read is what knows.
+        tracker.record(DIM, new ContainerRecord(POS, tracker.palette().intern(DIM),
+                tracker.palette().intern("minecraft:chest"), Origin.NATURAL, null,
+                true, false, null, 1, List.of()));
+
+        tracker.record(DIM, observed(2, new StackEntry(1, 3)));
+
+        ContainerRecord stored = tracker.index(DIM).get(POS);
+        assertFalse(stored.unlooted());
+        assertTrue(stored.contentsKnown());
+        assertEquals(Origin.NATURAL, stored.origin(), "but where it came from is still known");
+    }
+
+    @Test
+    void inheritedClassificationIsNotReportedAsAChange() {
+        // Otherwise every re-read of a player-placed chest looks like a change
+        // and watchers never stop re-querying.
+        java.util.UUID owner = java.util.UUID.randomUUID();
+        tracker.record(DIM, placedBy(owner, 1, new StackEntry(1, 5)));
+        long after = tracker.generation(DIM);
+
+        tracker.record(DIM, observed(2, new StackEntry(1, 5)));
+
+        assertEquals(after, tracker.generation(DIM));
+    }
+
     @Test
     void dimensionsCountSeparately() {
         // A scan running in one dimension must not wake players in another.

@@ -59,6 +59,35 @@ public record ContainerRecord(
     }
 
     /**
+     * Carries forward what a fresh observation cannot re-derive.
+     *
+     * <p>Reading a container tells you what is inside it. It does not tell you
+     * who placed it, and nothing on disk ever will - that was observed once,
+     * at the moment it happened, and is gone the instant it is overwritten.
+     *
+     * <p>Both scanners build records from scratch, so without this every
+     * re-read reset a chest to {@code UNKNOWN} with no owner. Putting an item
+     * into a chest you had just placed was enough to erase the fact that you
+     * placed it, which broke the player-placed filter and silently emptied the
+     * {@code OWNED} permission tier.
+     *
+     * <p>Only classification is inherited. Contents, {@code unlooted} and
+     * {@code contentsKnown} come from the new observation, because those are
+     * exactly what it is authoritative about - a generated chest that has since
+     * been opened must stop being flagged unlooted.
+     */
+    public ContainerRecord inheriting(ContainerRecord previous) {
+        if (previous == null) return this;
+
+        Origin combined = previous.origin.merge(origin);
+        UUID knownOwner = owner != null ? owner : previous.owner;
+        if (combined == origin && knownOwner == owner) return this;
+
+        return new ContainerRecord(pos, dimensionId, typeId, combined, knownOwner,
+                unlooted, contentsKnown, customName, lastSeenTick, contents);
+    }
+
+    /**
      * Whether this record says the same thing as {@code other}, ignoring when
      * it was last seen.
      *

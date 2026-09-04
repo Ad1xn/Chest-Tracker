@@ -204,6 +204,14 @@ public final class ChestTrackerCommands {
                     "  %s: %d containers, %d with known contents, %d unlooted, %d chunks, %d distinct items",
                     dimensionId, stats.containers(), stats.withKnownContents(),
                     stats.unlooted(), stats.chunks(), stats.distinctItems())), false);
+            // Worth printing: it is the only way to check from in-game that
+            // placement is being attributed at all, which the origin filter and
+            // the OWNED tier both depend on.
+            source.sendSuccess(() -> Component.literal(String.format(
+                    "    origins: %d player-placed, %d natural, %d unknown",
+                    stats.byOrigin().getOrDefault(dev.adrian.chesttracker.core.model.Origin.PLAYER_PLACED, 0),
+                    stats.byOrigin().getOrDefault(dev.adrian.chesttracker.core.model.Origin.NATURAL, 0),
+                    stats.byOrigin().getOrDefault(dev.adrian.chesttracker.core.model.Origin.UNKNOWN, 0))), false);
         }
         return tracker.totalContainers();
     }

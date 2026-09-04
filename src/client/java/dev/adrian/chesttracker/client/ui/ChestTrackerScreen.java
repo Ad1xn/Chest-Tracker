@@ -71,12 +71,18 @@ public final class ChestTrackerScreen extends Screen {
     private static final int BEVEL_DARK = 0xFF555555;
     private static final int GROOVE = 0xFF8B8B8B;
     private static final int GROOVE_DARK = 0xFF373737;
+    // Vanilla's own container-label colour. Everything written on the window
+    // uses it; nothing is colour-coded, because a GUI built out of the vanilla
+    // chest texture that then writes in colours nowhere else in the game uses
+    // looks like a mod pasted over it.
     private static final int TEXT_DARK = 0xFF404040;
+
+    /** Vanilla's greyed-out text, for a setting sitting at its default. */
+    private static final int TEXT_MUTED = 0xFF808080;
     private static final int TEXT_LIGHT = 0xFFFFFFFF;
     private static final int SLOT_HOVER = 0x80FFFFFF;
     private static final int ROW_HOVER = 0x40000000;
     private static final int BUTTON_ON = 0xFF6A9A4A;
-    private static final int BUTTON_ON_TEXT = 0xFF2F6B1F;
 
     private static final int BUTTON_SIZE = 12;
     private static final int TOOLBAR_BUTTONS = 2;   // menu, close
@@ -109,10 +115,17 @@ public final class ChestTrackerScreen extends Screen {
         Sort(String label) {
             this.label = label;
         }
+
+        static Sort parse(String name) {
+            for (Sort value : values()) {
+                if (value.name().equalsIgnoreCase(name)) return value;
+            }
+            return COUNT;
+        }
     }
 
     private EditBox search;
-    private String pending = "";
+    private String pending = ChestTrackerConfig.get().searchText;
 
     private List<QueryDto.ItemSummary> items = List.of();
     private List<QueryDto.ContainerHit> containers = List.of();
@@ -156,11 +169,12 @@ public final class ChestTrackerScreen extends Screen {
     /** A change arrived while the detail pane was open, so the grid is behind. */
     private boolean itemsStale;
 
-    private Sort sort = Sort.COUNT;
-    // Seeded from the settings rather than hardcoded, so the two agree.
+    // Every filter picks up where it was left. Re-choosing them on each open
+    // is the kind of friction that makes a tool feel unfinished.
+    private Sort sort = Sort.parse(ChestTrackerConfig.get().sortMode);
     private boolean includeNested = ChestTrackerConfig.get().includeNested;
     private boolean includeMachines = ChestTrackerConfig.get().showMachines;
-    private int originIndex;   // 0 all, 1 player-placed, 2 natural
+    private int originIndex = Math.max(0, Math.min(2, ChestTrackerConfig.get().originFilter));
 
     private int panelX;
     private int panelY;
@@ -184,6 +198,9 @@ public final class ChestTrackerScreen extends Screen {
                 Component.literal("Search"));
         search.setMaxLength(64);
         search.setHint(Component.literal("Search"));
+        // Set before the responder, so restoring the last search does not count
+        // as the player typing it again.
+        search.setValue(pending);
         search.setResponder(value -> {
             pending = value;
             refreshItems();
@@ -201,7 +218,31 @@ public final class ChestTrackerScreen extends Screen {
     @Override
     public void removed() {
         ClientTracker.setWatching(false);
+        rememberPreferences();
         super.removed();
+    }
+
+    /**
+     * Writes the filters and the search box back to the settings.
+     *
+     * <p>Only when something actually moved, so closing the screen does not
+     * rewrite the config file every time it is opened and shut.
+     */
+    private void rememberPreferences() {
+        ChestTrackerConfig config = ChestTrackerConfig.get();
+        boolean changed = config.includeNested != includeNested
+                || config.showMachines != includeMachines
+                || config.originFilter != originIndex
+                || !config.sortMode.equals(sort.name())
+                || !config.searchText.equals(pending);
+        if (!changed) return;
+
+        config.includeNested = includeNested;
+        config.showMachines = includeMachines;
+        config.originFilter = originIndex;
+        config.sortMode = sort.name();
+        config.searchText = pending;
+        config.save();
     }
 
     // --- data --------------------------------------------------------------
@@ -682,8 +723,11 @@ public final class ChestTrackerScreen extends Screen {
             // The value is right-aligned so the states line up in a column and
             // can be read down without reading every label.
             String value = row.value();
+            // The one place a colour still means something: a filter that has
+            // been moved off its default reads at full strength, one left alone
+            // is greyed. Both are vanilla greys.
             gfx.text(font, Component.literal(value), x + MENU_W - 4 - font.width(value), rowY,
-                    row.active() ? BUTTON_ON_TEXT : TEXT_DARK);
+                    row.active() ? TEXT_DARK : TEXT_MUTED);
         }
     }
 

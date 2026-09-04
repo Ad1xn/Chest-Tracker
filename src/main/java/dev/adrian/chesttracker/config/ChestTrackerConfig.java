@@ -69,6 +69,21 @@ public final class ChestTrackerConfig {
     /** Whether items inside shulker boxes count as being in the outer container. */
     public boolean includeNested = true;
 
+    // --- Remembered search screen state -----------------------------------
+    //
+    // The screen is reopened constantly, and re-picking the same filters every
+    // time is the kind of small friction that makes a tool feel unfinished.
+    // These are written when it closes.
+
+    /** {@code COUNT}, {@code NEAREST} or {@code NAME}; anything else reads as COUNT. */
+    public String sortMode = "COUNT";
+
+    /** 0 any, 1 player-placed, 2 natural. Out-of-range reads as 0. */
+    public int originFilter = 0;
+
+    /** Whatever was last typed in the search box. */
+    public String searchText = "";
+
     // --- Multiplayer ------------------------------------------------------
 
     /**

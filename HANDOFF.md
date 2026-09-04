@@ -16,7 +16,7 @@ containers after you physically open them.
 - Local: `/Users/adrian/chesttracker`
 - Targets: **MC 1.21.11 and 26.2**, Fabric, both first-class
 - Released: `v0.1.0`, with a GitHub Actions release workflow on `v*` tags
-- 125 unit tests, green on both targets
+- 129 unit tests, green on both targets
 
 ### The constraint that shapes everything
 
@@ -195,6 +195,24 @@ platform/NetworkCompat     the one version shim: PayloadTypeRegistry accessors
 client/net/ServerLink      connection state, correlation, timeouts, fallback
 ```
 
+### Classification survives a re-read
+
+Both scanners build a `ContainerRecord` from scratch, and neither can tell who placed a container -
+that is observed once, by the `setPlacedBy` hook, and nowhere else. Until this was fixed, **putting
+an item into a chest you had just placed erased the fact that you placed it**: the re-read wrote
+`Origin.UNKNOWN` with a null owner straight over it. The player-placed filter therefore found
+nothing, and the `OWNED` permission tier silently served nobody.
+
+`ContainerRecord.inheriting` carries origin and owner forward, and `TrackerService.record` applies
+it - one chokepoint, so the live path, the offline region scan and anything added later are all
+covered. Only classification is inherited: contents, `unlooted` and `contentsKnown` come from the
+new observation, so a generated chest that has since been opened still stops being flagged unlooted.
+
+**Records written before this fix stay `UNKNOWN`** - the information is genuinely gone and cannot be
+recovered by rescanning. Re-place the container, or accept that only containers placed from now on
+are attributed. `/chesttracker stats` now prints the origin breakdown, which is the only way to
+check attribution is working at all from in-game.
+
 ### Permission is restated on every reply
 
 `Hello` carries `canQuery`, but it is only an opening position. **Permission can change while a
@@ -292,6 +310,14 @@ what they did nor what state they were in. Machines are hidden by default, so "I
 into a hopper and only saw what reached the chest" was undiscoverable - the hopper's contents were
 indexed the whole time, just filtered out of the results. The burger menu lists each filter with its
 current value.
+
+**Screen state is remembered.** Sort, origin, the two toggles and the search text are written to
+the config when the screen closes, and seeded back on open.
+
+**Nothing in the GUI is colour-coded.** It is built out of vanilla's chest texture, so writing in
+colours the rest of the game does not use made it look pasted on. Everything uses vanilla's own
+label grey; the single exception is the menu, where a filter moved off its default reads at full
+strength and one left alone is greyed - both vanilla greys.
 
 **Not verified:** the actual client-to-server round trip in game. That needs a real client joining a
 real server, which cannot be driven headlessly here. Worth doing before release: join a dedicated
