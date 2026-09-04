@@ -10,9 +10,13 @@
   "entrypoints": {
     "main": [ "dev.adrian.chesttracker.ChestTracker" ],
     "client": [ "dev.adrian.chesttracker.client.ChestTrackerClient" ],
-    "server": [ "dev.adrian.chesttracker.server.ChestTrackerServer" ]
+    "server": [ "dev.adrian.chesttracker.server.ChestTrackerServer" ],
+    "modmenu": [ "dev.adrian.chesttracker.client.ModMenuIntegration" ]
   },
   "mixins": [ "${mod_id}.mixins.json" ],
+  "suggests": {
+    "modmenu": "*"
+  },
   "breaks": {
     "chesttracker": "*"
   },

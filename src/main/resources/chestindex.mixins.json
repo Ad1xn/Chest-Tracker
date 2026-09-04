@@ -2,7 +2,7 @@
   "required": true,
   "minVersion": "0.8",
   "package": "dev.adrian.chesttracker.mixin",
-  "compatibilityLevel": "JAVA_21",
+  "compatibilityLevel": "${mixin_compat}",
   "mixins": [
     "BlockEntityMixin",
     "BlockMixin",
