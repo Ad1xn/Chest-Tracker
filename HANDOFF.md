@@ -15,8 +15,8 @@ containers after you physically open them.
 - Repo: <https://github.com/Ad1xn/Chest-Tracker> (public, remote `origin`, branch `main`)
 - Local: `/Users/adrian/chesttracker`
 - Targets: **MC 1.21.11 and 26.2**, Fabric, both first-class
-- Released: `v0.1.0`, with a GitHub Actions release workflow on `v*` tags
-- 132 unit tests, green on both targets
+- Released: **`v0.9.0`**, with a GitHub Actions release workflow on `v*` tags
+- 154 unit tests, green on both targets
 
 ### The constraint that shapes everything
 
@@ -45,7 +45,7 @@ export JAVA_HOME=$(/usr/libexec/java_home -v 26)   # MUST be JDK 25+
 toolchain; the 26.2 target fails outright otherwise. Foojay toolchain provisioning does *not* fix
 this. This machine has JDK 21/22/26 but no 25 — 26 works fine.
 
-Jars land in `versions/<mc>/build/libs/chest-tracker-<mc>-0.1.0+<mc>.jar`.
+Jars land in `versions/<mc>/build/libs/chest-tracker-<mc>-<version>+<mc>.jar`.
 
 ### Non-obvious build facts (each cost real time — do not "simplify" them away)
 
@@ -95,9 +95,11 @@ core/       PURE JAVA. No Minecraft, no Bukkit, no Fabric. Enforced by CorePurit
   model/    ContainerRecord, StackEntry, Origin
   index/    WorldIndex (byPos + byChunk + inverted byItem), IndexQuery, SearchResult
   anvil/    NbtReader/NbtCompound, RegionFile, WorldLayout, ChunkExtractor, OriginClassifier
-  store/    StringPalette, IndexCodec (gzipped binary, atomic temp-file write)
+  store/    StringPalette, IndexCodec (gzipped binary, atomic temp-file write),
+            ScanLog (which region files have been read, plain text, unit-tested)
   highlight/HighlightTimer  (the "moving towards it" rule, unit-tested)
-  net/      QueryDto  (wire shapes, shared by both query routes)
+            HighlightTargets (which of several matches is nearest, unit-tested)
+  net/      QueryDto  (wire shapes, shared by both query routes; PROTOCOL_VERSION lives here)
   util/     BlockKey (our own long packing, NOT Minecraft's)
 
 platform/   version-conditional shims (server side), incl. NetworkCompat
@@ -105,8 +107,21 @@ net/        CustomPacketPayload types + codecs, registration, server handlers
 server/     TrackerService, QueryService, Trackers (static hook target), LiveScanner,
             RegionScanner, commands
 mixin/      BlockEntityMixin (setChanged), BlockMixin (setPlacedBy), LevelMixin (setBlock)
-client/     ChestTrackerScreen, ConfigScreen, ClientTracker, ContainerHighlight,
-            net/ServerLink, platform/Gfx + ClientCompat, ModMenuIntegration
+
+client/
+  ui/       ChestTrackerScreen  the search grid, container list, dimension buttons, scan bar
+            ConfigScreen        two columns, every setting tooltipped
+            HighlightColourScreen  the marker colour palette
+            SearchButton        the magnifier added to other mods' container windows
+            SlotHighlight       marks the searched item in whatever container is open
+  highlight/ContainerHighlight  the live selection: targets, guidance, the per-frame turn
+            HighlightBox        twelve edges and a dotted trail, written by hand
+  platform/ Gfx, ClientCompat, WorldHighlightHook (the one big render divergence)
+  mixin/client/  ContainerScreenAccessor (hoveredSlot, leftPos, topPos, imageWidth)
+                 KeyMappingAccessor (the bound key, not the default one)
+  ContainerScreens  everything added to container screens: the key, the button, the marks
+  ContainerSearch   the hotkey's search: filters from the menu, open-in-reach, highlight
+  ClientTracker, net/ServerLink, ModMenuIntegration
 ```
 
 `core` is deliberately game-free so one implementation serves both MC versions, everything is
@@ -380,16 +395,62 @@ still falls back to "No index here yet." within the grace period.
 
 - **Vanilla-server fallback** (locations from loaded chunks + remember-on-open). Phase 7 only made
   the *detection* honest: the client now recognises a server without the mod and says "No index here
-  yet." instead of appearing broken. It still indexes nothing there. **Note the README's "Where it
-  works" section already claims this works** ("it maps where containers are, remembers what you've
-  seen inside") — that claim is not true yet, and either the feature or the sentence needs to move
-  before release.
+  yet." instead of appearing broken. It still indexes nothing there. The README used to claim
+  otherwise; that was corrected for 0.9.0 and now says plainly that a vanilla server gets nothing.
+  If the feature lands, that section needs changing back.
 - **Paper plugin.** Designed in the plan, sequenced last. `core` is already game-free so it can be
   extracted as a Gradle module when that starts. Paper API: `1.21.11-R0.1-SNAPSHOT` and
   `26.2.build.121-stable`. Paper, not Spigot — Adventure matters because `/chesttracker find` is the
   whole interface for vanilla clients. Folia explicitly out of scope.
-- **Item tooltips** in the GUI (hover writes into the title row instead).
 - **LICENSE file** — `fabric.mod.json` claims MIT but no file exists.
+- **ShulkerBoxTooltip integration.** Written and then taken back out; it did not visibly work and
+  the cause was never found. The machinery was sound and is worth restarting from: `@Mixin(targets =
+  "...")` names their two renderers as strings, every parameter is a vanilla type, so it needs no
+  build dependency, and a config plugin keeps it unapplied when the mod is absent — all verified,
+  including that it remapped correctly for the obfuscated target. The open question is only whether
+  `TAIL` on their `drawSlot` draws over their item icon or under it. Restore with a revert of
+  `072c064`; the work is in `aa0a243`.
+- **Performance under a search.** The user reports a noticeable cost when a search lands. One real
+  cause was found and fixed (the slot marks were resolving a registry id and building a string per
+  slot per frame), but it was never profiled, and whether the remainder is the query, the markers,
+  or the auto-open is unknown.
+
+---
+
+## What 0.9.0 added, and what it cost to learn
+
+Issues #1, #2 and #3, plus the rename, all in one session. The subsystems are listed in the
+architecture section above; these are the things that were expensive to find out.
+
+- **`GLFW_KEY_Z` is a physical position on a US layout.** On the user's QWERTZ keyboard that is the
+  key labelled **Y**. Five rounds went into "the hotkey does not fire" before this surfaced, during
+  which a polling fallback was built on the false premise that Fabric's screen keyboard events were
+  not being delivered. They were. The poll is gone; the screen-event route is the one that works,
+  and it is what the original mod uses too.
+- **`RenderPipelines.LINES` uses `POSITION_COLOR_NORMAL_LINE_WIDTH` on both targets.** The fourth
+  element has no default and the render type sets none. Omitting it does not draw a thin line, it
+  throws `IllegalStateException: Missing elements in vertex` on the *second* vertex of the first
+  edge and takes the render thread down. Not a version divergence — 1.21.11 is identical.
+- **On 26.2 the geometry is submitted as a node and replayed later.** Reading the camera at submit
+  time and pairing it with the pose from replay time offsets everything by however far the camera
+  moved in between: boxes slide sideways while strafing, worst up close. Read the camera *inside*
+  the callback.
+- **A marker that grows with distance also shrinks as you approach**, which reads as the marker
+  drifting rather than resizing. Growth is snapped to a quarter block so it changes in steps.
+- **Past the far plane nothing is drawn at all**, however large. Distant markers are pulled in to
+  `renderDistance * 16 * 0.85` and drawn there, keeping their true-distance size.
+- **A container screen never forwards a right-drag to its widgets** — it handles dragging for its own
+  quick-craft. The search button's drag is polled from the client tick for that reason.
+- **`Screen.hasShiftDown()` is gone on both targets.** Read the window instead.
+- **`BundleContents.items()` returns `ItemStackTemplate` on 26.2** and `ItemStack` on 1.21.11.
+  `itemCopyStream()` is `Stream<ItemStack>` on both and needs no shim.
+- **26.x moved the current screen off `Minecraft` entirely** onto `Gui.screen()`; 1.21.11 still has
+  it as a public field. Shimmed in `ClientCompat.currentScreen()`.
+- **Ender chest contents are not in the index and cannot be.** The block stores nothing; the
+  contents are player data. The ender view reads them live off the asking player, under the reserved
+  name `chest-tracker:ender_chest`, which is not a dimension and says so.
+- **Adding a field to a payload without moving `PROTOCOL_VERSION` does not fail, it desyncs** — the
+  reader takes its next field out of the middle of the previous one. Now at **4**.
 
 ---
 
