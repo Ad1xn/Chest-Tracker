@@ -28,3 +28,8 @@ versions/*/logs/
 # OS
 .DS_Store
 .claude/worktrees/
+
+# Working notes, not for publication. Contains local paths and a running
+# account of what has and has not been verified - useful to whoever is
+# building this, misleading to anyone reading it as documentation.
+HANDOFF.md
