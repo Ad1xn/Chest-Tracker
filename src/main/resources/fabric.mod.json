@@ -15,8 +15,7 @@
   },
   "mixins": [
     "${mod_id}.mixins.json",
-    { "config": "${mod_id}.client.mixins.json", "environment": "client" },
-    { "config": "${mod_id}.compat.mixins.json", "environment": "client" }
+    { "config": "${mod_id}.client.mixins.json", "environment": "client" }
   ],
   "suggests": {
     "modmenu": "*"
