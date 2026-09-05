@@ -251,6 +251,15 @@ public final class ChestTrackerConfig {
      */
     public boolean nestedTooltip = true;
 
+    /**
+     * Mark the slots holding what was searched for, in whatever container is
+     * open.
+     *
+     * <p>Walking to the right chest is only most of the answer; opening it
+     * leaves fifty-four slots to scan for the thing the mod just found.
+     */
+    public boolean highlightFoundSlots = true;
+
     // --- Highlight colours -------------------------------------------------
 
     /**

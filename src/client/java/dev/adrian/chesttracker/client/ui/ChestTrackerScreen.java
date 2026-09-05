@@ -425,6 +425,7 @@ public final class ChestTrackerScreen extends Screen {
                     List<Long> positions = new ArrayList<>(response.hits().size());
                     for (QueryDto.ContainerHit hit : response.hits()) positions.add(hit.pos());
                     ContainerHighlight.get().select(positions, dimensionId, label);
+                    ContainerHighlight.get().searchingFor(itemId);
                 }));
         onClose();
     }
@@ -1209,6 +1210,8 @@ public final class ChestTrackerScreen extends Screen {
         ContainerHighlight.get().select(hit.pos(),
                 minecraft.player.level().dimension().identifier().toString(),
                 displayName(selectedItemId));
+        // So the container, once opened, can mark the slots holding it.
+        ContainerHighlight.get().searchingFor(selectedItemId);
         onClose();
     }
 

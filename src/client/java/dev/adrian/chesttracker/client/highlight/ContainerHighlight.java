@@ -53,6 +53,15 @@ public final class ContainerHighlight {
     private String dimensionId;
     private String label;
 
+    /**
+     * The registry id of what was searched for, or null.
+     *
+     * <p>Kept beside the label because the label is for reading and this is
+     * for comparing - marking slots in an open container needs to know which
+     * item, not what it is called in the player's language.
+     */
+    private String searchedItemId;
+
     /** Counts down while the view is being turned towards the nearest match. */
     private int turnTicksLeft;
 
@@ -116,6 +125,17 @@ public final class ContainerHighlight {
     public void clear() {
         timer.clear();
         positions = List.of();
+        searchedItemId = null;
+    }
+
+    /** The registry id being looked for, for marking slots. Null when inactive. */
+    public String searchedItemId() {
+        return searchedItemId;
+    }
+
+    /** Names the item a selection is about, so open containers can mark it. */
+    public void searchingFor(String itemId) {
+        this.searchedItemId = itemId;
     }
 
     /**

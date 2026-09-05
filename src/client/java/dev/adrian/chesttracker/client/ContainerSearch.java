@@ -96,6 +96,7 @@ public final class ContainerSearch {
                     ContainerHighlight.get().select(
                             hits.stream().map(QueryDto.ContainerHit::pos).toList(),
                             dimensionId, label);
+                    ContainerHighlight.get().searchingFor(id.toString());
                     openIfInReach(hits, now);
                 }));
         return true;

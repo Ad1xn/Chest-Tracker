@@ -67,6 +67,30 @@ public final class ClientCompat {
         Minecraft.getInstance().setScreenAndShow(screen);
     }
 
+    /** What {@link #afterScreenRender} hands back, once per frame. */
+    public interface ScreenDraw {
+        void draw(Gfx gfx, int mouseX, int mouseY);
+    }
+
+    /**
+     * Draws over a screen this mod did not write, after everything else on it.
+     *
+     * <p>Another of the deferred-renderer renames: the event is
+     * {@code afterRender} on 1.21.11 and {@code afterExtract} on 26.x. The
+     * callbacks are the same shape - screen, graphics, mouse, tick - so only
+     * the name and the graphics type differ, and {@link Gfx} already absorbs
+     * the second.
+     */
+    public static void afterScreenRender(Screen screen, ScreenDraw draw) {
+        //? if >=26.1 {
+        /*net.fabricmc.fabric.api.client.screen.v1.ScreenEvents.afterExtract(screen).register(
+                (target, graphics, mouseX, mouseY, tick) -> draw.draw(new Gfx(graphics), mouseX, mouseY));
+        *///?} else {
+        net.fabricmc.fabric.api.client.screen.v1.ScreenEvents.afterRender(screen).register(
+                (target, graphics, mouseX, mouseY, tick) -> draw.draw(new Gfx(graphics), mouseX, mouseY));
+        //?}
+    }
+
     /**
      * Adds a widget to a screen this mod did not write.
      *

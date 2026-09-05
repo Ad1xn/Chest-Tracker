@@ -4,6 +4,7 @@ import com.mojang.blaze3d.platform.InputConstants;
 import dev.adrian.chesttracker.ChestTracker;
 import dev.adrian.chesttracker.client.platform.ClientCompat;
 import dev.adrian.chesttracker.client.ui.SearchButton;
+import dev.adrian.chesttracker.client.ui.SlotHighlight;
 import dev.adrian.chesttracker.config.ChestTrackerConfig;
 import dev.adrian.chesttracker.mixin.client.ContainerScreenAccessor;
 import dev.adrian.chesttracker.mixin.client.KeyMappingAccessor;
@@ -81,6 +82,10 @@ public final class ContainerScreens {
                 ChestTracker.LOG.info("Container screen hook installed on {}",
                         container.getClass().getName());
             }
+
+            ClientCompat.afterScreenRender(screen, (gfx, mouseX, mouseY) ->
+                    SlotHighlight.draw(gfx, container,
+                            access.chesttracker$leftPos(), access.chesttracker$topPos()));
 
             ScreenKeyboardEvents.beforeKeyPress(screen).register((ignored, keyEvent) -> {
                 if (searchHovered.matches(keyEvent)) trigger(container, "screen event");
