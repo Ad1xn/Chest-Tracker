@@ -1,5 +1,6 @@
 package dev.adrian.chesttracker.client.ui;
 
+import com.mojang.blaze3d.platform.InputConstants;
 import dev.adrian.chesttracker.client.ClientTracker;
 import dev.adrian.chesttracker.client.highlight.ContainerHighlight;
 import dev.adrian.chesttracker.client.platform.ClientCompat;
@@ -15,6 +16,7 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
+import org.lwjgl.glfw.GLFW;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -718,13 +720,32 @@ public final class ChestTrackerScreen extends Screen {
 
         if (hovered >= 0) {
             QueryDto.ItemSummary summary = items.get(hovered);
-            hoverLabel = String.format("%s  %,d in %d  -  right-click to list",
-                    displayName(summary.itemId()), summary.totalCount(), summary.containerCount());
-            if (nested.tooltips()) drawItemTooltip(gfx, summary, mouseX, mouseY);
+            hoverLabel = String.format("%s  %,d in %d  -  %s",
+                    displayName(summary.itemId()), summary.totalCount(), summary.containerCount(),
+                    nested.tooltips() && !shiftHeld() ? "shift for detail" : "right-click to list");
+            // Only while shift is held. A panel that appears under the cursor
+            // on its own covers the grid the player is reading and follows them
+            // around it; behind a modifier it is there when wanted and gone
+            // otherwise. The title bar still carries the one-line version.
+            if (nested.tooltips() && shiftHeld()) {
+                drawItemTooltip(gfx, summary, mouseX, mouseY);
+            }
         } else if (items.isEmpty()) {
             gfx.text(font, Component.literal(pending.isBlank() ? "Nothing indexed yet" : "No match"),
                     gridX(), gridY() + 4, TEXT_MAIN);
         }
+    }
+
+    /**
+     * Whether either shift key is down.
+     *
+     * <p>Asked of the window rather than of {@code Screen}, which no longer
+     * offers it on either target. The hotkey poll reads input the same way.
+     */
+    private boolean shiftHeld() {
+        if (minecraft == null || minecraft.getWindow() == null) return false;
+        return InputConstants.isKeyDown(minecraft.getWindow(), GLFW.GLFW_KEY_LEFT_SHIFT)
+                || InputConstants.isKeyDown(minecraft.getWindow(), GLFW.GLFW_KEY_RIGHT_SHIFT);
     }
 
     /**

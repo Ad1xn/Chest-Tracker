@@ -66,8 +66,14 @@ public final class ContainerHighlight {
      */
     private static final double DRAW_RADIUS = 512.0;
 
-    /** Enough to show a base's worth without filling the screen with wire. */
-    private static final int MAX_BOXES = 96;
+    /**
+     * Enough to show a base's worth without filling the screen with wire.
+     *
+     * <p>Lowered from ninety-six: every marker is a box and a beam, so the
+     * count is the one number that decides how much a search costs to draw,
+     * and thirty-two containers is already more than anyone reads at once.
+     */
+    private static final int MAX_BOXES = 32;
 
     private ContainerHighlight() {}
 
@@ -104,7 +110,7 @@ public final class ContainerHighlight {
         LocalPlayer player = Minecraft.getInstance().player;
         double distance = player == null ? 0 : distanceTo(player);
         timer.start(distance, System.currentTimeMillis());
-        turnTicksLeft = ChestTrackerConfig.get().turnToTarget ? TURN_TICKS : 0;
+        turnTicksLeft = ChestTrackerConfig.get().turnToTarget ? TURN_MAX_TICKS : 0;
     }
 
     public void clear() {
@@ -122,6 +128,24 @@ public final class ContainerHighlight {
      */
     private static final double GROW_PER_BLOCK = 0.008;
 
+    /** Where "far" begins, and the box starts growing in earnest. */
+    private static final double FAR_FROM = 200.0;
+
+    /** Growth per block past {@link #FAR_FROM}, five times the near rate. */
+    private static final double FAR_GROW_PER_BLOCK = 0.04;
+
+    /**
+     * Growth is snapped to this, and line width to a whole pixel.
+     *
+     * <p>Because growth depends on distance, a box that grows smoothly also
+     * <em>shrinks</em> smoothly as the player walks towards it - and a box
+     * quietly changing size every frame does not read as a box changing size.
+     * It reads as a box that will not sit still on the chest, which is exactly
+     * how it was reported. Snapping means it changes in occasional steps
+     * instead, and holds still in between.
+     */
+    private static final double GROW_STEP = 0.5;
+
     /**
      * Distance at which a box starts growing at all.
      *
@@ -132,8 +156,8 @@ public final class ContainerHighlight {
      */
     private static final double GROW_FROM = 24.0;
 
-    /** Past this the box would swallow the building it is in. */
-    private static final double MAX_GROW = 1.0;
+    /** Past this the box is large enough to find from anywhere it is visible. */
+    private static final double MAX_GROW = 8.0;
 
     /** Below this the container is in plain sight and a beam only clutters it. */
     private static final double BEAM_MIN_DISTANCE = 8.0;
@@ -141,8 +165,23 @@ public final class ContainerHighlight {
     /** How far the trail of marks rises above its container. */
     private static final double BEAM_HEIGHT = 32.0;
 
-    /** Ticks spent turning to face a match, about a third of a second. */
-    private static final int TURN_TICKS = 7;
+    /**
+     * How much of what is left to turn is taken each tick.
+     *
+     * <p>A fraction of the remainder rather than a fixed share of a fixed
+     * number of ticks: the turn slows as it arrives instead of stopping dead,
+     * and because the step shrinks with the gap, the last few ticks move the
+     * view by less than the eye can catch. The previous version divided the
+     * remaining angle by the remaining ticks, which is a constant speed with a
+     * hard stop at the end - the part that looked wrong.
+     */
+    private static final float TURN_EASE = 0.28f;
+
+    /** Close enough to stop turning; below this the correction is invisible. */
+    private static final float TURN_DONE_DEGREES = 0.75f;
+
+    /** A turn is abandoned after this, so it can never fight the mouse for long. */
+    private static final int TURN_MAX_TICKS = 30;
 
     private static final float BASE_LINE_WIDTH = 2.0f;
     private static final float LINE_WIDTH_PER_BLOCK = 0.02f;
@@ -165,6 +204,10 @@ public final class ContainerHighlight {
      * @param eye the camera position; boxes are drawn relative to it
      */
     public void drawBoxes(PoseStack.Pose pose, VertexConsumer lines, Vec3 eye) {
+        // Read once. This runs per container per frame, and the config lookup
+        // does not change between two boxes of the same frame.
+        boolean beams = ChestTrackerConfig.get().guideBeam;
+
         int drawn = 0;
         for (Long position : positions) {
             if (drawn >= MAX_BOXES) break;
@@ -183,10 +226,9 @@ public final class ContainerHighlight {
             // across a base is something you can find by looking rather than
             // something you have to already be pointing at.
             double distance = Math.sqrt(distSq);
-            double beyond = Math.max(0.0, distance - GROW_FROM);
-            double grow = Math.min(MAX_GROW, beyond * GROW_PER_BLOCK);
-            float width = (float) Math.min(MAX_LINE_WIDTH,
-                    BASE_LINE_WIDTH + beyond * LINE_WIDTH_PER_BLOCK);
+            double grow = growthAt(distance);
+            float width = (float) Math.round(Math.min(MAX_LINE_WIDTH,
+                    BASE_LINE_WIDTH + Math.max(0.0, distance - GROW_FROM) * LINE_WIDTH_PER_BLOCK));
 
             // The nearest one is picked out, because that is the one the action
             // bar is talking about and the one the player is walking towards.
@@ -199,7 +241,7 @@ public final class ContainerHighlight {
 
             // The column is what carries at range, and the only part of this
             // that means anything where no terrain is drawn to place it.
-            if (ChestTrackerConfig.get().guideBeam && distance > BEAM_MIN_DISTANCE) {
+            if (beams && distance > BEAM_MIN_DISTANCE) {
                 HighlightBox.beam(pose, lines,
                         x - eye.x + 0.5, y - eye.y + 1.0, z - eye.z + 0.5, BEAM_HEIGHT,
                         nearest ? 1.0f : 0.25f,
@@ -209,6 +251,21 @@ public final class ContainerHighlight {
             }
             drawn++;
         }
+    }
+
+    /**
+     * How much larger than its block a marker is drawn at a given distance.
+     *
+     * <p>Two rates. Up to two hundred blocks the box only has to stay legible,
+     * so it barely grows; past that it is competing with the horizon and grows
+     * five times as fast. The result is snapped to half a block so that walking
+     * changes it in steps rather than continuously - see {@link #GROW_STEP}.
+     */
+    private static double growthAt(double distance) {
+        double grow = Math.max(0.0, distance - GROW_FROM) * GROW_PER_BLOCK;
+        if (distance > FAR_FROM) grow += (distance - FAR_FROM) * FAR_GROW_PER_BLOCK;
+        grow = Math.min(MAX_GROW, grow);
+        return Math.round(grow / GROW_STEP) * GROW_STEP;
     }
 
     /**
@@ -232,10 +289,16 @@ public final class ContainerHighlight {
         // rather than three hundred and fifty eight.
         float yawGap = Mth.wrapDegrees(wantYaw - player.getYRot());
         float pitchGap = wantPitch - player.getXRot();
-        float step = 1.0f / turnTicksLeft;
 
-        player.setYRot(player.getYRot() + yawGap * step);
-        player.setXRot(player.getXRot() + pitchGap * step);
+        // Arrived. Stopping here rather than nudging for another twenty ticks
+        // is what keeps it from feeling like the mouse is being held.
+        if (Math.abs(yawGap) < TURN_DONE_DEGREES && Math.abs(pitchGap) < TURN_DONE_DEGREES) {
+            turnTicksLeft = 0;
+            return;
+        }
+
+        player.setYRot(player.getYRot() + yawGap * TURN_EASE);
+        player.setXRot(player.getXRot() + pitchGap * TURN_EASE);
         turnTicksLeft--;
     }
 
