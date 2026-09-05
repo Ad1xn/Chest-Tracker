@@ -10,11 +10,16 @@ import dev.adrian.chesttracker.core.net.QueryDto;
 import dev.adrian.chesttracker.core.util.BlockKey;
 import net.minecraft.commands.Commands;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.resources.Identifier;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.Container;
+import net.minecraft.world.item.ItemStack;
 
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Locale;
 import java.util.Set;
 
@@ -89,6 +94,10 @@ public final class QueryService {
 
         if (!mayQuery(player, access)) return QueryDto.SummaryResponse.refused(request.requestId());
 
+        if (QueryDto.ENDER_CHEST.equals(request.dimensionId())) {
+            return enderChestSummary(player, request);
+        }
+
         String dimensionId = requestedDimension(tracker, player, request.dimensionId());
         IndexQuery.Builder builder = IndexQuery.builder()
                 .center(centreOf(player))
@@ -125,6 +134,12 @@ public final class QueryService {
 
         int id = request.requestId();
         if (!mayQuery(player, access)) return QueryDto.ContainerResponse.refused(id);
+
+        // Nothing to walk to. The ender chest is wherever the player is, so a
+        // list of places holding an item has no places in it.
+        if (QueryDto.ENDER_CHEST.equals(request.dimensionId())) {
+            return QueryDto.ContainerResponse.of(id, List.of());
+        }
 
         int itemId = tracker.palette().lookup(request.itemId());
         // Never interned means nothing indexed has ever held it.
@@ -195,6 +210,49 @@ public final class QueryService {
     }
 
     /**
+     * The asking player's own ender chest, totalled like any other view.
+     *
+     * <p>Read straight off the player rather than out of the index. There is
+     * nothing to index: the block stores nothing, the contents live in player
+     * data, and they change without any of the events the index listens to. A
+     * live read is also the only version that is correct about whose ender
+     * chest it is - a stored one would have to answer "whose", and the answer
+     * is never anybody but the asker.
+     */
+    private static QueryDto.SummaryResponse enderChestSummary(
+            ServerPlayer player, QueryDto.SummaryRequest request) {
+
+        Map<String, int[]> totals = new java.util.LinkedHashMap<>();
+        Container ender = player.getEnderChestInventory();
+        for (int slot = 0; slot < ender.getContainerSize(); slot++) {
+            ItemStack stack = ender.getItem(slot);
+            if (stack.isEmpty()) continue;
+            Identifier id = BuiltInRegistries.ITEM.getKey(stack.getItem());
+            if (id == null) continue;
+            totals.computeIfAbsent(id.toString(), key -> new int[1])[0] += stack.getCount();
+        }
+
+        String needle = normalise(request.text());
+        List<QueryDto.ItemSummary> items = new java.util.ArrayList<>(totals.size());
+        totals.forEach((itemId, count) -> {
+            if (!needle.isEmpty() && !itemId.toLowerCase(java.util.Locale.ROOT).contains(needle)) return;
+            // One container, no distance: it is in your pocket, not the world.
+            items.add(new QueryDto.ItemSummary(itemId, count[0], 1, 0, 0.0));
+        });
+        items.sort((a, b) -> Integer.compare(b.totalCount(), a.totalCount()));
+        return QueryDto.SummaryResponse.of(request.requestId(), items);
+    }
+
+    /** True when the asking player has anything in their ender chest. */
+    private static boolean hasEnderChestContents(ServerPlayer player) {
+        Container ender = player.getEnderChestInventory();
+        for (int slot = 0; slot < ender.getContainerSize(); slot++) {
+            if (!ender.getItem(slot).isEmpty()) return true;
+        }
+        return false;
+    }
+
+    /**
      * Which index a request means.
      *
      * <p>An unknown or blank name falls back to where the player is standing,
@@ -227,6 +285,13 @@ public final class QueryService {
             if (containers > 0) dimensions.add(new QueryDto.DimensionSummary(dimensionId, containers));
         }
         dimensions.sort(java.util.Comparator.comparing(QueryDto.DimensionSummary::dimensionId));
+
+        // Appended after the sort, so it is always last rather than filed under
+        // "c" among the real dimensions. Offered only when it holds something:
+        // an empty ender chest is a button that answers nothing.
+        if (hasEnderChestContents(player)) {
+            dimensions.add(new QueryDto.DimensionSummary(QueryDto.ENDER_CHEST, 1));
+        }
 
         dev.adrian.chesttracker.server.scan.RegionScanner scanner = Trackers.regionScanner();
         dev.adrian.chesttracker.server.scan.RegionScanner.Progress progress =

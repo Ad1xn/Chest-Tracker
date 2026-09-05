@@ -701,8 +701,7 @@ public final class ChestTrackerScreen extends Screen {
             gfx.fill(x, y, x + 1, y + DIMENSION_H - 1, BEVEL_LIGHT);
             if (hovered) {
                 gfx.fill(x + 1, y + 1, x + DIMENSION_W - 1, y + DIMENSION_H - 1, SLOT_HOVER);
-                hoverLabel = shortName(dimension.dimensionId())
-                        + "  -  " + String.format("%,d containers", dimension.containers());
+                hoverLabel = dimensionLabel(dimension);
             }
 
             String glyph = dimensionGlyph(dimension.dimensionId());
@@ -716,6 +715,7 @@ public final class ChestTrackerScreen extends Screen {
 
     /** A letter each, because there is no room for a word and no icon to use. */
     private static String dimensionGlyph(String dimensionId) {
+        if (QueryDto.ENDER_CHEST.equals(dimensionId)) return "e";
         String name = shortName(dimensionId);
         return switch (name) {
             case "overworld" -> "O";
@@ -723,6 +723,22 @@ public final class ChestTrackerScreen extends Screen {
             case "the_end" -> "E";
             default -> name.isEmpty() ? "?" : name.substring(0, 1).toUpperCase(java.util.Locale.ROOT);
         };
+    }
+
+    /**
+     * What a dimension button says when pointed at.
+     *
+     * <p>The ender chest needs saying in words. Its glyph is a lowercase e
+     * beside the End's capital one, which is a thin distinction to hang on -
+     * but it is last in the row, it is the only one that is not a place, and
+     * the label is right there under the cursor.
+     */
+    private String dimensionLabel(QueryDto.DimensionSummary dimension) {
+        if (QueryDto.ENDER_CHEST.equals(dimension.dimensionId())) {
+            return "your ender chest";
+        }
+        return shortName(dimension.dimensionId())
+                + "  -  " + String.format("%,d containers", dimension.containers());
     }
 
     private String currentDimensionId() {

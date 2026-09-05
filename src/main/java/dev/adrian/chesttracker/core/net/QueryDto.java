@@ -175,6 +175,17 @@ public final class QueryDto {
         }
     }
 
+    /**
+     * The name the ender chest answers to, where a dimension id would go.
+     *
+     * <p>Not a dimension, and deliberately in this mod's namespace so it can
+     * never collide with a real one. Ender chest contents belong to a player
+     * rather than to a world - they are the same wherever you stand, and they
+     * are nobody else's business - so they cannot be indexed alongside the
+     * containers in a world, and are read live from whoever is asking.
+     */
+    public static final String ENDER_CHEST = "chest-tracker:ender_chest";
+
     /** Ask what the index holds and whether it is still filling. */
     public record StatusRequest(int requestId) {}
 
