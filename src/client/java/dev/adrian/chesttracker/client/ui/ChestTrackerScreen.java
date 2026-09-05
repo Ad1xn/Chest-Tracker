@@ -97,11 +97,6 @@ public final class ChestTrackerScreen extends Screen {
     private static final int ROW_HOVER = 0x40000000;
     private static final int BUTTON_ON = 0xFF6A9A4A;
 
-    // The shulker mark, in vanilla's own shulker box purples.
-    private static final int NESTED_MARK_EDGE = 0xFF2B1B33;
-    private static final int NESTED_MARK = 0xFF8A5A8A;
-    private static final int NESTED_MARK_LID = 0xFFC49AC4;
-
     private static final int TOOLTIP_BG = 0xF0100010;
     private static final int TOOLTIP_EDGE = 0xFF5000FF;
 
@@ -698,7 +693,7 @@ public final class ChestTrackerScreen extends Screen {
 
     private void drawGrid(Gfx gfx, int mouseX, int mouseY) {
         int hovered = slotAt(mouseX, mouseY);
-        ChestTrackerConfig.Nested nested = ChestTrackerConfig.get().nestedDisplay();
+        boolean panel = ChestTrackerConfig.get().nestedTooltip;
 
         for (int row = 0; row < ROWS; row++) {
             for (int col = 0; col < COLS; col++) {
@@ -711,9 +706,6 @@ public final class ChestTrackerScreen extends Screen {
 
                 gfx.item(iconFor(summary.itemId()), x, y);
                 drawCount(gfx, summary.totalCount(), x, y);
-                if (summary.nestedCount() > 0 && nested.marks()) {
-                    drawNestedMark(gfx, x, y);
-                }
                 if (index == hovered) gfx.fill(x, y, x + 16, y + 16, SLOT_HOVER);
             }
         }
@@ -722,12 +714,12 @@ public final class ChestTrackerScreen extends Screen {
             QueryDto.ItemSummary summary = items.get(hovered);
             hoverLabel = String.format("%s  %,d in %d  -  %s",
                     displayName(summary.itemId()), summary.totalCount(), summary.containerCount(),
-                    nested.tooltips() && !shiftHeld() ? "shift for detail" : "right-click to list");
+                    panel && !shiftHeld() ? "shift for detail" : "right-click to list");
             // Only while shift is held. A panel that appears under the cursor
             // on its own covers the grid the player is reading and follows them
             // around it; behind a modifier it is there when wanted and gone
             // otherwise. The title bar still carries the one-line version.
-            if (nested.tooltips() && shiftHeld()) {
+            if (panel && shiftHeld()) {
                 drawItemTooltip(gfx, summary, mouseX, mouseY);
             }
         } else if (items.isEmpty()) {
@@ -746,23 +738,6 @@ public final class ChestTrackerScreen extends Screen {
         if (minecraft == null || minecraft.getWindow() == null) return false;
         return InputConstants.isKeyDown(minecraft.getWindow(), GLFW.GLFW_KEY_LEFT_SHIFT)
                 || InputConstants.isKeyDown(minecraft.getWindow(), GLFW.GLFW_KEY_RIGHT_SHIFT);
-    }
-
-    /**
-     * A shulker box in the corner of a slot whose contents are sealed inside one.
-     *
-     * <p>Drawn rather than blitted: there is no vanilla sprite for "this is in
-     * a shulker", and an item icon scaled into the corner is unreadable at six
-     * pixels. A lid and a body is enough to be recognised, and it sits bottom
-     * left so it does not fight the stack count on the right.
-     */
-    private void drawNestedMark(Gfx gfx, int slotX, int slotY) {
-        int x = slotX + 1;
-        int y = slotY + 10;
-        gfx.fill(x, y, x + 6, y + 6, NESTED_MARK_EDGE);
-        gfx.fill(x + 1, y + 1, x + 5, y + 5, NESTED_MARK);
-        // The lid, a band across the top with a pixel of gap under it.
-        gfx.fill(x + 1, y + 1, x + 5, y + 2, NESTED_MARK_LID);
     }
 
     /**

@@ -49,6 +49,8 @@ public final class ConfigScreen extends Screen {
      */
     private static final int ROWS_PER_COLUMN = 7;
 
+    /** Sliders on this page are the full column width. */
+
     private static final int MAX_RESULTS_CEILING = 2000;
     private static final int RESULTS_STEP = 50;
 
@@ -170,7 +172,17 @@ public final class ConfigScreen extends Screen {
                 () -> config.containerSearchButton, value -> config.containerSearchButton = value));
 
         x = columnX(); y = rowY();
-        place(nestedCycle(x, y));
+        place(toggle(x, y, "Shift shows item detail",
+                "Holding shift over an item in the search grid describes it: how many\nthere are, in how many containers, how many are sealed inside shulker\nboxes, and how far the nearest is.",
+                () -> config.nestedTooltip, value -> config.nestedTooltip = value));
+
+        x = columnX(); y = rowY();
+        place(Button.builder(Component.literal("Highlight colours..."),
+                        button -> minecraft.setScreenAndShow(new HighlightColourScreen(this)))
+                .bounds(x, y, WIDGET_WIDTH, 20)
+                .tooltip(Tooltip.create(Component.literal(
+                        "The colours the in-world markers are drawn in - one for the\nnearest match, one for the rest.")))
+                .build());
 
         x = columnX(); y = rowY();
         place(accessCycle(x, y));
@@ -186,24 +198,40 @@ public final class ConfigScreen extends Screen {
      * <p>{@link AbstractSliderButton} works in 0..1, so the conversion lives
      * here once rather than at every call site.
      */
-    private abstract static class IntSlider extends AbstractSliderButton {
+    abstract static class IntSlider extends AbstractSliderButton {
 
         private final int min;
         private final int max;
         private final int step;
 
+        /** The settings-page shape: full width, and zero means "unlimited". */
         IntSlider(int x, int y, int current, int min, int max, int step) {
-            super(x, y, WIDGET_WIDTH, 20, Component.empty(), fraction(current, min, max));
+            this(x, y, WIDGET_WIDTH, current, min, max, step, true);
+        }
+
+        /**
+         * A plain slider of a given width, where zero is simply zero.
+         *
+         * <p>The distinction matters: the results slider treats a stored zero
+         * as "no limit" and parks it at the top, which is right there and
+         * wrong for anything measuring a quantity - a colour channel of zero
+         * would jump to full brightness.
+         */
+        IntSlider(int x, int y, int width, int current, int min, int max, int step) {
+            this(x, y, width, current, min, max, step, false);
+        }
+
+        private IntSlider(int x, int y, int width, int current,
+                          int min, int max, int step, boolean zeroIsMax) {
+            super(x, y, width, 20, Component.empty(), fraction(current, min, max, zeroIsMax));
             this.min = min;
             this.max = max;
             this.step = step;
             updateMessage();
         }
 
-        private static double fraction(int current, int min, int max) {
-            // A stored zero means "unlimited", which sits at the top of the
-            // slider rather than the bottom.
-            int effective = current <= 0 ? max : current;
+        private static double fraction(int current, int min, int max, boolean zeroIsMax) {
+            int effective = zeroIsMax && current <= 0 ? max : current;
             return Math.min(1.0, Math.max(0.0, (effective - min) / (double) (max - min)));
         }
 
@@ -272,26 +300,6 @@ public final class ConfigScreen extends Screen {
             case NONE -> "nothing";
         };
         return "Show found containers as: " + mode;
-    }
-
-    /** Cycles how the grid shows an item that is sealed inside shulker boxes. */
-    private Button nestedCycle(int x, int y) {
-        return Button.builder(Component.literal(nestedLabel()), button -> {
-            ChestTrackerConfig.Nested[] modes = ChestTrackerConfig.Nested.values();
-            int next = (config.nestedDisplay().ordinal() + 1) % modes.length;
-            config.nestedDisplay = modes[next].name();
-            button.setMessage(Component.literal(nestedLabel()));
-        }).bounds(x, y, WIDGET_WIDTH, 20).build();
-    }
-
-    private String nestedLabel() {
-        String mode = switch (config.nestedDisplay()) {
-            case MARK -> "a corner mark";
-            case TOOLTIP -> "a hover panel";
-            case BOTH -> "mark and panel";
-            case NONE -> "not at all";
-        };
-        return "Items in shulkers: " + mode;
     }
 
     /**

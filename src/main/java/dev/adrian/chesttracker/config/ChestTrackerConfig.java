@@ -242,46 +242,45 @@ public final class ChestTrackerConfig {
      */
     public boolean guideBeam = true;
 
-    /** How the grid says an item is sealed inside shulker boxes. */
-    public enum Nested {
-        /** A small shulker mark in the corner of the slot. */
-        MARK,
-        /** A panel under the cursor, with the numbers spelled out. */
-        TOOLTIP,
-        BOTH,
-        NONE;
+    /**
+     * Whether holding shift over a slot describes what is in it.
+     *
+     * <p>The panel is the whole of this feature. An earlier version also put a
+     * small shulker in the corner of the slot, which was a second thing to
+     * learn to read for information the panel already gives properly.
+     */
+    public boolean nestedTooltip = true;
 
-        /** Unknown text reads as the default rather than throwing on a typo. */
-        public static Nested parse(String value) {
-            if (value == null) return BOTH;
-            for (Nested nested : values()) {
-                if (nested.name().equalsIgnoreCase(value.trim())) return nested;
-            }
-            return BOTH;
-        }
-
-        public boolean marks() {
-            return this == MARK || this == BOTH;
-        }
-
-        public boolean tooltips() {
-            return this == TOOLTIP || this == BOTH;
-        }
-    }
+    // --- Highlight colours -------------------------------------------------
 
     /**
-     * Whether the grid marks items that are inside shulker boxes, describes
-     * them under the cursor, or both.
+     * The nearest match, as 0xRRGGBB.
      *
-     * <p>Both by default, because the two answer different questions. The mark
-     * is what makes a sealed stack visible while scanning the grid; the panel
-     * is where the numbers that matter live, and you only get it for the one
-     * slot you are pointing at.
+     * <p>Not yellow, and not blue. Those were the first choice and the wrong
+     * one: the sun is yellow and the sky is blue, so a marker in either
+     * disappears into exactly the background it is most often seen against.
+     * Red is worse - it reads as damage. Magenta occurs almost nowhere in
+     * Minecraft's terrain, which is what makes it legible against all of it.
      */
-    public String nestedDisplay = Nested.BOTH.name();
+    public int nearestColour = 0xFF2BD0;
 
-    public Nested nestedDisplay() {
-        return Nested.parse(nestedDisplay);
+    /** Every other match, dimmer so the nearest still stands out. */
+    public int otherColour = 0xB478FF;
+
+    public float[] nearestRgb() {
+        return rgb(nearestColour);
+    }
+
+    public float[] otherRgb() {
+        return rgb(otherColour);
+    }
+
+    private static float[] rgb(int packed) {
+        return new float[] {
+                ((packed >> 16) & 0xFF) / 255.0f,
+                ((packed >> 8) & 0xFF) / 255.0f,
+                (packed & 0xFF) / 255.0f,
+        };
     }
 
     /** Seconds a highlight lasts while the player keeps making progress towards it. */

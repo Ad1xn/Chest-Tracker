@@ -180,6 +180,16 @@ public final class ContainerHighlight {
     /** Close enough to stop turning; below this the correction is invisible. */
     private static final float TURN_DONE_DEGREES = 0.75f;
 
+    /**
+     * The most the view may swing in one tick.
+     *
+     * <p>Easing alone still snapped: a quarter of a hundred-and-eighty degree
+     * gap is forty-five degrees in a single tick, and no amount of smoothing
+     * after that hides the first step. Capping the speed makes a long turn
+     * take longer rather than start violently.
+     */
+    private static final float TURN_MAX_STEP = 7.0f;
+
     /** A turn is abandoned after this, so it can never fight the mouse for long. */
     private static final int TURN_MAX_TICKS = 30;
 
@@ -206,7 +216,10 @@ public final class ContainerHighlight {
     public void drawBoxes(PoseStack.Pose pose, VertexConsumer lines, Vec3 eye) {
         // Read once. This runs per container per frame, and the config lookup
         // does not change between two boxes of the same frame.
-        boolean beams = ChestTrackerConfig.get().guideBeam;
+        ChestTrackerConfig config = ChestTrackerConfig.get();
+        boolean beams = config.guideBeam;
+        float[] nearestColour = config.nearestRgb();
+        float[] otherColour = config.otherRgb();
 
         int drawn = 0;
         for (Long position : positions) {
@@ -220,12 +233,20 @@ public final class ContainerHighlight {
             double dy = y + 0.5 - eye.y;
             double dz = z + 0.5 - eye.z;
             double distSq = dx * dx + dy * dy + dz * dz;
-            if (distSq > DRAW_RADIUS * DRAW_RADIUS) continue;
+            double distance = Math.sqrt(distSq);
+
+            // Past the far plane nothing is drawn at all - the projection
+            // clips it, which is why a container thousands of blocks away
+            // showed nothing whatever its size. Those are pulled in to the
+            // edge of what can be drawn and marked there, pointing the right
+            // way, like a waypoint on the horizon. The size still comes from
+            // the real distance, so a clamped marker reads as a far one.
+            double limit = horizon();
+            double pull = distance > limit ? limit / distance : 1.0;
 
             // Both the box and its lines grow with distance, so a container
             // across a base is something you can find by looking rather than
             // something you have to already be pointing at.
-            double distance = Math.sqrt(distSq);
             double grow = growthAt(distance);
             float width = (float) Math.round(Math.min(MAX_LINE_WIDTH,
                     BASE_LINE_WIDTH + Math.max(0.0, distance - GROW_FROM) * LINE_WIDTH_PER_BLOCK));
@@ -233,24 +254,38 @@ public final class ContainerHighlight {
             // The nearest one is picked out, because that is the one the action
             // bar is talking about and the one the player is walking towards.
             boolean nearest = position == pos;
-            HighlightBox.emit(pose, lines, x - eye.x, y - eye.y, z - eye.z,
-                    nearest ? 1.0f : 0.25f,
-                    nearest ? 0.82f : 0.85f,
-                    nearest ? 0.2f : 1.0f,
-                    0.9f, grow, width);
+            float[] colour = nearest ? nearestColour : otherColour;
+
+            double drawX = dx * pull - 0.5;
+            double drawY = dy * pull - 0.5;
+            double drawZ = dz * pull - 0.5;
+
+            HighlightBox.emit(pose, lines, drawX, drawY, drawZ,
+                    colour[0], colour[1], colour[2], 0.9f, grow, width);
 
             // The column is what carries at range, and the only part of this
             // that means anything where no terrain is drawn to place it.
             if (beams && distance > BEAM_MIN_DISTANCE) {
                 HighlightBox.beam(pose, lines,
-                        x - eye.x + 0.5, y - eye.y + 1.0, z - eye.z + 0.5, BEAM_HEIGHT,
-                        nearest ? 1.0f : 0.25f,
-                        nearest ? 0.82f : 0.85f,
-                        nearest ? 0.2f : 1.0f,
-                        0.75f, width);
+                        drawX + 0.5, drawY + 1.5, drawZ + 0.5, BEAM_HEIGHT * pull,
+                        colour[0], colour[1], colour[2], 0.75f, width);
             }
             drawn++;
         }
+    }
+
+    /**
+     * How far out geometry can still be drawn.
+     *
+     * <p>The projection's far plane follows the render distance, so anything
+     * beyond it is clipped no matter how large it is drawn. Held just inside
+     * that, because a marker sitting exactly on the plane flickers in and out
+     * as the camera moves.
+     */
+    private static double horizon() {
+        Minecraft client = Minecraft.getInstance();
+        int chunks = client.options == null ? 8 : client.options.getEffectiveRenderDistance();
+        return Math.max(48.0, chunks * 16.0 * 0.85);
     }
 
     /**
@@ -297,8 +332,10 @@ public final class ContainerHighlight {
             return;
         }
 
-        player.setYRot(player.getYRot() + yawGap * TURN_EASE);
-        player.setXRot(player.getXRot() + pitchGap * TURN_EASE);
+        player.setYRot(player.getYRot()
+                + Mth.clamp(yawGap * TURN_EASE, -TURN_MAX_STEP, TURN_MAX_STEP));
+        player.setXRot(player.getXRot()
+                + Mth.clamp(pitchGap * TURN_EASE, -TURN_MAX_STEP, TURN_MAX_STEP));
         turnTicksLeft--;
     }
 
