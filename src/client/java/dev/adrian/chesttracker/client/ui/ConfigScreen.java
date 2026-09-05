@@ -33,7 +33,15 @@ import net.minecraft.client.gui.GuiGraphics;
  */
 public final class ConfigScreen extends Screen {
 
-    private static final int ROW_HEIGHT = 24;
+    /**
+     * Two pixels of gap between twenty-pixel widgets.
+     *
+     * <p>Tightened from twenty-four when the list reached eight rows: at that
+     * height the page ran past the bottom of the window at the larger GUI
+     * scales, and a setting off the edge of the screen is a setting that does
+     * not exist.
+     */
+    private static final int ROW_HEIGHT = 22;
     private static final int WIDGET_WIDTH = 200;
 
     /** Gap between the two columns. */
@@ -47,7 +55,16 @@ public final class ConfigScreen extends Screen {
      * the bottom of the list simply left the screen, which is a worse way to
      * hide a setting than not having it.
      */
-    private static final int ROWS_PER_COLUMN = 7;
+    private static final int ROWS_PER_COLUMN = 8;
+
+    /**
+     * Where the first row sits.
+     *
+     * <p>Chosen so that eight rows and the Done button still land inside a
+     * two-hundred-and-forty pixel window, which is what seven hundred and
+     * twenty pixels at GUI scale three gives you. The title clears it.
+     */
+    private static final int TOP = 30;
 
     /** Sliders on this page are the full column width. */
 
@@ -74,7 +91,7 @@ public final class ConfigScreen extends Screen {
     }
 
     private int rowY() {
-        return 40 + (placed % ROWS_PER_COLUMN) * ROW_HEIGHT;
+        return TOP + (placed % ROWS_PER_COLUMN) * ROW_HEIGHT;
     }
 
     /** Places the next widget, wrapping into the second column when the first fills. */
@@ -172,6 +189,11 @@ public final class ConfigScreen extends Screen {
                 () -> config.containerSearchButton, value -> config.containerSearchButton = value));
 
         x = columnX(); y = rowY();
+        place(toggle(x, y, "Ender chest view",
+                "Offers your ender chest as a view of its own, beside the dimension\nbuttons. It lists only what is in there - never mixed with a\ndimension - and appears only when it is not empty.",
+                () -> config.enderChestView, value -> config.enderChestView = value));
+
+        x = columnX(); y = rowY();
         place(toggle(x, y, "Shift shows item detail",
                 "Holding shift over an item in the search grid describes it: how many\nthere are, in how many containers, how many are sealed inside shulker\nboxes, and how far the nearest is.",
                 () -> config.nestedTooltip, value -> config.nestedTooltip = value));
@@ -187,7 +209,7 @@ public final class ConfigScreen extends Screen {
         x = columnX(); y = rowY();
         place(accessCycle(x, y));
 
-        int bottom = 40 + ROWS_PER_COLUMN * ROW_HEIGHT + 12;
+        int bottom = TOP + ROWS_PER_COLUMN * ROW_HEIGHT + 10;
         addRenderableWidget(Button.builder(Component.literal("Done"), button -> onClose())
                 .bounds(width / 2 - 60, bottom, 120, 20).build());
     }

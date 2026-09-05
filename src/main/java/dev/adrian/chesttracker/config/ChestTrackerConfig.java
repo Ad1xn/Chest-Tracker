@@ -86,6 +86,16 @@ public final class ChestTrackerConfig {
 
     // --- Container screens ------------------------------------------------
 
+    /**
+     * Offer the ender chest as a view of its own.
+     *
+     * <p>Client-side, and read by the screen rather than by the server: it is
+     * about whether this player wants the button, not about what the server is
+     * willing to answer. A server that has never heard of the setting still
+     * behaves correctly for a client that turns it off.
+     */
+    public boolean enderChestView = true;
+
     /** Whether a search button is drawn on chests, furnaces and the like. */
     public boolean containerSearchButton = true;
 

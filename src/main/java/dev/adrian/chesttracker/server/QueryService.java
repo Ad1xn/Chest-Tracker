@@ -10,12 +10,16 @@ import dev.adrian.chesttracker.core.net.QueryDto;
 import dev.adrian.chesttracker.core.util.BlockKey;
 import net.minecraft.commands.Commands;
 import net.minecraft.core.BlockPos;
+import dev.adrian.chesttracker.platform.ItemContentsCompat;
+import net.minecraft.core.component.DataComponents;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.Container;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.component.BundleContents;
+import net.minecraft.world.item.component.ItemContainerContents;
 
 import java.util.HashSet;
 import java.util.List;
@@ -222,25 +226,55 @@ public final class QueryService {
     private static QueryDto.SummaryResponse enderChestSummary(
             ServerPlayer player, QueryDto.SummaryRequest request) {
 
+        // {total, nested}, so the detail panel can say how much of it is
+        // sealed inside something - the same question it answers everywhere else.
         Map<String, int[]> totals = new java.util.LinkedHashMap<>();
         Container ender = player.getEnderChestInventory();
+        boolean nested = request.filters().includeNested();
         for (int slot = 0; slot < ender.getContainerSize(); slot++) {
-            ItemStack stack = ender.getItem(slot);
-            if (stack.isEmpty()) continue;
-            Identifier id = BuiltInRegistries.ITEM.getKey(stack.getItem());
-            if (id == null) continue;
-            totals.computeIfAbsent(id.toString(), key -> new int[1])[0] += stack.getCount();
+            collectEnderStack(totals, ender.getItem(slot), nested, false);
         }
 
         String needle = normalise(request.text());
         List<QueryDto.ItemSummary> items = new java.util.ArrayList<>(totals.size());
-        totals.forEach((itemId, count) -> {
+        totals.forEach((itemId, counts) -> {
             if (!needle.isEmpty() && !itemId.toLowerCase(java.util.Locale.ROOT).contains(needle)) return;
             // One container, no distance: it is in your pocket, not the world.
-            items.add(new QueryDto.ItemSummary(itemId, count[0], 1, 0, 0.0));
+            items.add(new QueryDto.ItemSummary(itemId, counts[0], 1, counts[1], 0.0));
         });
         items.sort((a, b) -> Integer.compare(b.totalCount(), a.totalCount()));
         return QueryDto.SummaryResponse.of(request.requestId(), items);
+    }
+
+    /**
+     * Adds one stack, and what is inside it, to the ender chest totals.
+     *
+     * <p>A shulker box in an ender chest is counted both ways: the box itself,
+     * because it is a thing you own, and its contents, because "list every item
+     * in it" means the items. The second half is skipped when the menu's nested
+     * filter is off, exactly as it is for containers in the world.
+     */
+    private static void collectEnderStack(Map<String, int[]> totals, ItemStack stack,
+                                          boolean includeNested, boolean isNested) {
+        if (stack.isEmpty()) return;
+
+        Identifier id = BuiltInRegistries.ITEM.getKey(stack.getItem());
+        if (id != null) {
+            int[] counts = totals.computeIfAbsent(id.toString(), key -> new int[2]);
+            counts[0] += stack.getCount();
+            if (isNested) counts[1] += stack.getCount();
+        }
+        if (!includeNested) return;
+
+        ItemContainerContents contents = stack.get(DataComponents.CONTAINER);
+        if (contents != null) {
+            ItemContentsCompat.stacks(contents)
+                    .forEach(inner -> collectEnderStack(totals, inner, true, true));
+        }
+        BundleContents bundle = stack.get(DataComponents.BUNDLE_CONTENTS);
+        if (bundle != null) {
+            bundle.itemCopyStream().forEach(inner -> collectEnderStack(totals, inner, true, true));
+        }
     }
 
     /** True when the asking player has anything in their ender chest. */
