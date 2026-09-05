@@ -112,6 +112,7 @@ public final class ChestTrackerPayloads {
                                 buf.writeUtf(item.itemId(), MAX_ID);
                                 buf.writeVarInt(item.totalCount());
                                 buf.writeVarInt(item.containerCount());
+                                buf.writeVarInt(item.nestedCount());
                                 buf.writeDouble(item.nearestDistSq());
                             }
                         },
@@ -120,7 +121,8 @@ public final class ChestTrackerPayloads {
                             boolean permitted = buf.readBoolean();
                             return new SummaryResponsePayload(new QueryDto.SummaryResponse(requestId, permitted,
                                     readList(buf, b -> new QueryDto.ItemSummary(
-                                            b.readUtf(MAX_ID), b.readVarInt(), b.readVarInt(), b.readDouble()))));
+                                            b.readUtf(MAX_ID), b.readVarInt(), b.readVarInt(),
+                                            b.readVarInt(), b.readDouble()))));
                         });
 
         @Override

@@ -95,6 +95,14 @@ public final class ChestTrackerScreen extends Screen {
     private static final int ROW_HOVER = 0x40000000;
     private static final int BUTTON_ON = 0xFF6A9A4A;
 
+    // The shulker mark, in vanilla's own shulker box purples.
+    private static final int NESTED_MARK_EDGE = 0xFF2B1B33;
+    private static final int NESTED_MARK = 0xFF8A5A8A;
+    private static final int NESTED_MARK_LID = 0xFFC49AC4;
+
+    private static final int TOOLTIP_BG = 0xF0100010;
+    private static final int TOOLTIP_EDGE = 0xFF5000FF;
+
     private static final int BUTTON_SIZE = 12;
     private static final int TOOLBAR_BUTTONS = 2;   // menu, close
     private static final int MENU_W = 132;
@@ -688,6 +696,7 @@ public final class ChestTrackerScreen extends Screen {
 
     private void drawGrid(Gfx gfx, int mouseX, int mouseY) {
         int hovered = slotAt(mouseX, mouseY);
+        ChestTrackerConfig.Nested nested = ChestTrackerConfig.get().nestedDisplay();
 
         for (int row = 0; row < ROWS; row++) {
             for (int col = 0; col < COLS; col++) {
@@ -700,6 +709,9 @@ public final class ChestTrackerScreen extends Screen {
 
                 gfx.item(iconFor(summary.itemId()), x, y);
                 drawCount(gfx, summary.totalCount(), x, y);
+                if (summary.nestedCount() > 0 && nested.marks()) {
+                    drawNestedMark(gfx, x, y);
+                }
                 if (index == hovered) gfx.fill(x, y, x + 16, y + 16, SLOT_HOVER);
             }
         }
@@ -708,9 +720,75 @@ public final class ChestTrackerScreen extends Screen {
             QueryDto.ItemSummary summary = items.get(hovered);
             hoverLabel = String.format("%s  %,d in %d  -  right-click to list",
                     displayName(summary.itemId()), summary.totalCount(), summary.containerCount());
+            if (nested.tooltips()) drawItemTooltip(gfx, summary, mouseX, mouseY);
         } else if (items.isEmpty()) {
             gfx.text(font, Component.literal(pending.isBlank() ? "Nothing indexed yet" : "No match"),
                     gridX(), gridY() + 4, TEXT_MAIN);
+        }
+    }
+
+    /**
+     * A shulker box in the corner of a slot whose contents are sealed inside one.
+     *
+     * <p>Drawn rather than blitted: there is no vanilla sprite for "this is in
+     * a shulker", and an item icon scaled into the corner is unreadable at six
+     * pixels. A lid and a body is enough to be recognised, and it sits bottom
+     * left so it does not fight the stack count on the right.
+     */
+    private void drawNestedMark(Gfx gfx, int slotX, int slotY) {
+        int x = slotX + 1;
+        int y = slotY + 10;
+        gfx.fill(x, y, x + 6, y + 6, NESTED_MARK_EDGE);
+        gfx.fill(x + 1, y + 1, x + 5, y + 5, NESTED_MARK);
+        // The lid, a band across the top with a pixel of gap under it.
+        gfx.fill(x + 1, y + 1, x + 5, y + 2, NESTED_MARK_LID);
+    }
+
+    /**
+     * What is actually known about the item under the cursor.
+     *
+     * <p>The title bar can hold one line, and the question that sends someone
+     * to this screen - "I have hundreds of these, so why can I never find one"
+     * - is usually answered by the second: they are inside shulker boxes.
+     *
+     * <p>Drawn by hand rather than through vanilla's tooltip renderer, whose
+     * entry point differs between the two targets and whose styling would have
+     * to be fought to match this window anyway.
+     */
+    private void drawItemTooltip(Gfx gfx, QueryDto.ItemSummary summary, int mouseX, int mouseY) {
+        List<String> lines = new ArrayList<>(4);
+        lines.add(displayName(summary.itemId()));
+        lines.add(String.format("%,d in %d container%s",
+                summary.totalCount(), summary.containerCount(),
+                summary.containerCount() == 1 ? "" : "s"));
+        if (summary.nestedCount() > 0) {
+            lines.add(summary.nestedCount() == summary.totalCount()
+                    ? "all of them inside shulker boxes"
+                    : String.format("%,d inside shulker boxes", summary.nestedCount()));
+        }
+        if (summary.nearestDistSq() < Double.MAX_VALUE) {
+            lines.add(String.format("nearest %.0fm away", Math.sqrt(summary.nearestDistSq())));
+        }
+
+        int textWidth = 0;
+        for (String line : lines) textWidth = Math.max(textWidth, font.width(line));
+
+        int boxW = textWidth + 8;
+        int boxH = lines.size() * 10 + 6;
+        // Kept inside the window: at the right-hand columns a panel following
+        // the cursor would otherwise hang off the screen edge.
+        int boxX = mouseX + 10 + boxW > panelX + panelW ? mouseX - 10 - boxW : mouseX + 10;
+        int boxY = Math.min(mouseY, panelY + panelH - boxH - 2);
+
+        gfx.fill(boxX, boxY, boxX + boxW, boxY + boxH, TOOLTIP_BG);
+        gfx.fill(boxX, boxY, boxX + boxW, boxY + 1, TOOLTIP_EDGE);
+        gfx.fill(boxX, boxY + boxH - 1, boxX + boxW, boxY + boxH, TOOLTIP_EDGE);
+        gfx.fill(boxX, boxY, boxX + 1, boxY + boxH, TOOLTIP_EDGE);
+        gfx.fill(boxX + boxW - 1, boxY, boxX + boxW, boxY + boxH, TOOLTIP_EDGE);
+
+        for (int i = 0; i < lines.size(); i++) {
+            gfx.text(font, Component.literal(lines.get(i)),
+                    boxX + 4, boxY + 4 + i * 10, i == 0 ? TEXT_MAIN : TEXT_MUTED);
         }
     }
 

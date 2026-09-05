@@ -88,7 +88,16 @@ public final class QueryDto {
      *
      * @param itemId registry name, e.g. {@code minecraft:redstone}
      */
-    public record ItemSummary(String itemId, int totalCount, int containerCount, double nearestDistSq) {}
+    /**
+     * @param nestedCount how many of {@code totalCount} are inside a shulker
+     *                    box rather than loose. Sent because the screen cannot
+     *                    work it out: a slot showing 900 wool looks identical
+     *                    whether it is stacked in a barrel or sealed inside
+     *                    nine shulkers, and those are different answers to
+     *                    "where is my wool".
+     */
+    public record ItemSummary(String itemId, int totalCount, int containerCount,
+                              int nestedCount, double nearestDistSq) {}
 
     /**
      * @param permitted whether the server answered this at all. Carried on

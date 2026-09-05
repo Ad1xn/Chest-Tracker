@@ -82,7 +82,7 @@ class QueryDtoTest {
     @Test
     void responsesCopyTheirListsAndTolerateNull() {
         List<QueryDto.ItemSummary> source = new java.util.ArrayList<>();
-        source.add(new QueryDto.ItemSummary("minecraft:redstone", 64, 1, 4.0));
+        source.add(new QueryDto.ItemSummary("minecraft:redstone", 64, 1, 0, 4.0));
         QueryDto.SummaryResponse response = QueryDto.SummaryResponse.of(7, source);
 
         source.clear();

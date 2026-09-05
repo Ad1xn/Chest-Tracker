@@ -45,8 +45,8 @@ class PayloadCodecTest {
     @Test
     void summaryResponseSurvivesTheRoundTrip() {
         QueryDto.SummaryResponse original = QueryDto.SummaryResponse.of(7, List.of(
-                new QueryDto.ItemSummary("minecraft:redstone", 2304, 4, 18.5),
-                new QueryDto.ItemSummary("minecraft:diamond", 12, 1, 400.0)));
+                new QueryDto.ItemSummary("minecraft:redstone", 2304, 4, 1728, 18.5),
+                new QueryDto.ItemSummary("minecraft:diamond", 12, 1, 0, 400.0)));
 
         FriendlyByteBuf buf = buffer();
         ChestTrackerPayloads.SummaryResponsePayload.CODEC.encode(

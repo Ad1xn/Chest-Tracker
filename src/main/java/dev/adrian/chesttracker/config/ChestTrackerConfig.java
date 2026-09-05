@@ -242,6 +242,48 @@ public final class ChestTrackerConfig {
      */
     public boolean guideBeam = true;
 
+    /** How the grid says an item is sealed inside shulker boxes. */
+    public enum Nested {
+        /** A small shulker mark in the corner of the slot. */
+        MARK,
+        /** A panel under the cursor, with the numbers spelled out. */
+        TOOLTIP,
+        BOTH,
+        NONE;
+
+        /** Unknown text reads as the default rather than throwing on a typo. */
+        public static Nested parse(String value) {
+            if (value == null) return BOTH;
+            for (Nested nested : values()) {
+                if (nested.name().equalsIgnoreCase(value.trim())) return nested;
+            }
+            return BOTH;
+        }
+
+        public boolean marks() {
+            return this == MARK || this == BOTH;
+        }
+
+        public boolean tooltips() {
+            return this == TOOLTIP || this == BOTH;
+        }
+    }
+
+    /**
+     * Whether the grid marks items that are inside shulker boxes, describes
+     * them under the cursor, or both.
+     *
+     * <p>Both by default, because the two answer different questions. The mark
+     * is what makes a sealed stack visible while scanning the grid; the panel
+     * is where the numbers that matter live, and you only get it for the one
+     * slot you are pointing at.
+     */
+    public String nestedDisplay = Nested.BOTH.name();
+
+    public Nested nestedDisplay() {
+        return Nested.parse(nestedDisplay);
+    }
+
     /** Seconds a highlight lasts while the player keeps making progress towards it. */
     public int highlightSeconds = 45;
 

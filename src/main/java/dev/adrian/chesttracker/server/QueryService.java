@@ -113,7 +113,7 @@ public final class QueryService {
             // and an unnamed row is no use to the client anyway.
             if (itemId == null) continue;
             items.add(new QueryDto.ItemSummary(itemId, summary.totalCount(),
-                    summary.containerCount(), summary.nearestDistSq()));
+                    summary.containerCount(), summary.nestedCount(), summary.nearestDistSq()));
         }
         return QueryDto.SummaryResponse.of(request.requestId(), items);
     }

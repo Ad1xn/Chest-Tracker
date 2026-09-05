@@ -306,6 +306,42 @@ class WorldIndexTest {
     }
 
     @Test
+    void summaryCountsWhatIsSealedInsideShulkersSeparately() {
+        // Twelve loose on the shelf, sixty-four sealed in a shulker in the
+        // same chest. Both are "diamonds you own"; only one lot can be seen.
+        index.put(chest(0, 64, 0,
+                new StackEntry(DIAMOND, 12),
+                new StackEntry(DIAMOND, 64, 1)));
+
+        WorldIndex.ItemSummary diamonds = index.summarise(IndexQuery.builder().build()).get(0);
+        assertEquals(76, diamonds.totalCount(), "nested stacks still count towards the total");
+        assertEquals(64, diamonds.nestedCount(), "and are counted again on their own");
+        assertEquals(1, diamonds.containerCount());
+    }
+
+    @Test
+    void nothingIsNestedWhenEveryStackIsLoose() {
+        index.put(chest(0, 64, 0, new StackEntry(DIAMOND, 30)));
+        index.put(chest(9, 64, 0, new StackEntry(DIAMOND, 12)));
+
+        WorldIndex.ItemSummary diamonds = index.summarise(IndexQuery.builder().build()).get(0);
+        assertEquals(42, diamonds.totalCount());
+        assertEquals(0, diamonds.nestedCount());
+    }
+
+    @Test
+    void excludingNestedStacksLeavesNothingNestedToReport() {
+        index.put(chest(0, 64, 0, new StackEntry(DIAMOND, 64, 1)));
+
+        // With nesting off the sealed stack is not counted at all, so the
+        // nested tally must not describe stacks the total does not include.
+        List<WorldIndex.ItemSummary> summary =
+                index.summarise(IndexQuery.builder().includeNested(false).build());
+        assertTrue(summary.isEmpty() || summary.get(0).nestedCount() == 0,
+                "a nested count without a matching total would be a lie");
+    }
+
+    @Test
     void summaryCountsAContainerOnceEvenWithSeveralStacks() {
         index.put(chest(0, 64, 0, new StackEntry(DIAMOND, 64), new StackEntry(DIAMOND, 32)));
 

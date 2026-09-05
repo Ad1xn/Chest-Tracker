@@ -259,9 +259,14 @@ public final class WorldIndex {
      * @param itemId         palette id of the item
      * @param totalCount     how many exist in total
      * @param containerCount how many containers hold at least one
+     * @param nestedCount    how many of those are inside a shulker box rather
+     *                       than loose in the container, which is the
+     *                       difference between "you have 900 of these" and
+     *                       "you have 900 of these and cannot see any of them"
      * @param nearestDistSq  squared distance to the closest of those containers
      */
-    public record ItemSummary(int itemId, int totalCount, int containerCount, double nearestDistSq)
+    public record ItemSummary(int itemId, int totalCount, int containerCount,
+                              int nestedCount, double nearestDistSq)
             implements Comparable<ItemSummary> {
         @Override
         public int compareTo(ItemSummary other) {
@@ -280,7 +285,7 @@ public final class WorldIndex {
      * container rows to add up by hand.
      */
     public List<ItemSummary> summarise(IndexQuery query) {
-        Map<Integer, int[]> totals = new HashMap<>();       // itemId -> {count, containers}
+        Map<Integer, int[]> totals = new HashMap<>();       // itemId -> {count, containers, nested}
         Map<Integer, Double> nearest = new HashMap<>();
 
         for (SearchResult result : query(query)) {
@@ -293,8 +298,9 @@ public final class WorldIndex {
                 if (!query.includeNested() && entry.isNested()) continue;
                 if (!query.itemIds().isEmpty() && !query.itemIds().contains(entry.itemId())) continue;
 
-                int[] totalsFor = totals.computeIfAbsent(entry.itemId(), id -> new int[2]);
+                int[] totalsFor = totals.computeIfAbsent(entry.itemId(), id -> new int[3]);
                 totalsFor[0] += entry.count();
+                if (entry.isNested()) totalsFor[2] += entry.count();
                 // Several stacks of one item in one chest is still one container.
                 if (seenHere.add(entry.itemId())) totalsFor[1]++;
 
@@ -304,7 +310,8 @@ public final class WorldIndex {
 
         List<ItemSummary> summaries = new ArrayList<>(totals.size());
         totals.forEach((itemId, counts) -> summaries.add(new ItemSummary(
-                itemId, counts[0], counts[1], nearest.getOrDefault(itemId, Double.MAX_VALUE))));
+                itemId, counts[0], counts[1], counts[2],
+                nearest.getOrDefault(itemId, Double.MAX_VALUE))));
         Collections.sort(summaries);
         return summaries;
     }
