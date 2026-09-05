@@ -163,7 +163,15 @@ public final class QueryDto {
      */
     public record Hello(int protocolVersion, boolean canQuery) {
 
-        /** Bumped when the payload shapes change incompatibly. */
-        public static final int PROTOCOL_VERSION = 2;
+        /**
+         * Bumped when the payload shapes change incompatibly.
+         *
+         * <p>3 added a nested count to every item summary. Two peers that
+         * disagree about a payload's shape while both claiming the same
+         * version do not fail, they desync - the reader takes the next field
+         * from the middle of the previous one - so this has to move whenever a
+         * field does.
+         */
+        public static final int PROTOCOL_VERSION = 3;
     }
 }
