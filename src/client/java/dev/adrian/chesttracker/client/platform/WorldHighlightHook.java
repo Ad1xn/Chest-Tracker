@@ -39,13 +39,20 @@ public final class WorldHighlightHook {
         /*net.fabricmc.fabric.api.client.rendering.v1.level.LevelRenderEvents.AFTER_TRANSLUCENT_TERRAIN
                 .register(context -> {
                     if (!ContainerHighlight.get().hasBoxes()) return;
-                    Vec3 eye = context.gameRenderer().mainCamera().position();
                     // Nothing is drawn now. The node is queued and replayed in
                     // the line phase, which is why the lambda takes its own pose
-                    // rather than closing over the one we have here.
+                    // rather than closing over the one we have here - and why
+                    // it reads the camera then too. Capturing the camera at
+                    // submit time paired a position from one moment with a pose
+                    // from another, and the gap between them is the player's
+                    // own movement: strafing slid every box sideways by exactly
+                    // how far the camera had travelled in between.
                     context.submitNodeCollector().submitCustomGeometry(
                             context.poseStack(), RenderTypes.lines(),
-                            (pose, lines) -> ContainerHighlight.get().drawBoxes(pose, lines, eye));
+                            (pose, lines) -> ContainerHighlight.get().drawBoxes(
+                                    pose, lines,
+                                    net.minecraft.client.Minecraft.getInstance()
+                                            .gameRenderer.mainCamera().position()));
                 });
         *///?} else {
         net.fabricmc.fabric.api.client.rendering.v1.world.WorldRenderEvents.AFTER_ENTITIES

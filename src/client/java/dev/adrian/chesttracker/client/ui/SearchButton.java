@@ -30,6 +30,12 @@ import net.minecraft.client.gui.GuiGraphics;
  * gesture that sometimes opens a window and sometimes does not is worse than
  * one the player has to learn.
  *
+ * <p>The drag itself is driven from {@code ContainerScreens} by polling the
+ * mouse, not by this widget's drag callbacks. A container screen handles
+ * dragging for its own quick-craft and never forwards a right-drag on to its
+ * widgets, so those callbacks are simply never delivered - which is exactly how
+ * it was reported.
+ *
  * <p>Drawn with flat colours rather than sampled from a texture, unlike the
  * search screen: this button lands on a furnace, a hopper, a modded machine -
  * whatever screen the player opened - and there is no one texture to take the
@@ -50,8 +56,6 @@ public final class SearchButton extends AbstractWidget {
     /** The container window's top-right corner, which the offset is measured from. */
     private final int anchorX;
     private final int anchorY;
-
-    private boolean dragging;
 
     public SearchButton(int anchorX, int anchorY) {
         super(0, 0, SIZE, SIZE, Component.literal("Search containers"));
@@ -101,41 +105,25 @@ public final class SearchButton extends AbstractWidget {
 
     // --- input --------------------------------------------------------------
 
+    /** Where the anchor is, so the drag poll can turn a position into an offset. */
+    public int anchorX() {
+        return anchorX;
+    }
+
+    public int anchorY() {
+        return anchorY;
+    }
+
     @Override
     public boolean mouseClicked(MouseButtonEvent event, boolean doubleClick) {
         if (!visible || !isMouseOver(event.x(), event.y())) return false;
 
-        if (event.button() == 1) {
-            dragging = true;
-            return true;
-        }
         if (event.button() == 0) {
             playDownSound(net.minecraft.client.Minecraft.getInstance().getSoundManager());
             ClientCompat.openScreen(new ChestTrackerScreen());
             return true;
         }
         return false;
-    }
-
-    @Override
-    public boolean mouseDragged(MouseButtonEvent event, double dragX, double dragY) {
-        if (!dragging) return false;
-        setX(getX() + (int) dragX);
-        setY(getY() + (int) dragY);
-        return true;
-    }
-
-    @Override
-    public boolean mouseReleased(MouseButtonEvent event) {
-        if (!dragging) return false;
-        dragging = false;
-        // Saved on release rather than on every drag event, so moving it once
-        // writes the file once instead of forty times.
-        ChestTrackerConfig config = ChestTrackerConfig.get();
-        config.searchButtonX = getX() - anchorX;
-        config.searchButtonY = getY() - anchorY;
-        config.save();
-        return true;
     }
 
     @Override

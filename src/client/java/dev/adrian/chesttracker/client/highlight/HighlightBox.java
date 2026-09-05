@@ -81,21 +81,27 @@ public final class HighlightBox {
      * is a vertex attribute, and a two-vertex line can only fade linearly from
      * end to end, which at this length is barely a gradient at all.
      */
-    /** Space between marks. */
-    private static final double BEAM_SPACING = 2.5;
+    /** Marks in a trail, however tall it is. */
+    private static final int BEAM_MARKS = 14;
 
-    /** How tall each mark is - short enough to read as a dot, not a dash. */
-    private static final double BEAM_MARK = 0.45;
+    /** How much of each step is drawn; the rest is the gap. */
+    private static final double BEAM_DUTY = 0.18;
 
     public static void beam(PoseStack.Pose pose, VertexConsumer lines,
                             double x, double y, double z, double height,
                             float red, float green, float blue, float alpha, float lineWidth) {
-        for (double at = 0; at < height; at += BEAM_SPACING) {
-            // Fades out with height, so the column reads as rising from the
+        // A fixed number of marks rather than a fixed spacing: the trail grows
+        // with distance, and fixed spacing on a four-hundred block trail is two
+        // hundred segments of which none are individually visible anyway.
+        double step = height / BEAM_MARKS;
+        double mark = step * BEAM_DUTY;
+        for (int i = 0; i < BEAM_MARKS; i++) {
+            double at = i * step;
+            // Fades out with height, so the trail reads as rising from the
             // container rather than falling on it.
-            float fade = alpha * (float) (1.0 - at / height);
+            float fade = alpha * (1.0f - (float) i / BEAM_MARKS);
             if (fade <= 0.02f) break;
-            line(pose, lines, x, y + at, z, x, y + at + BEAM_MARK, z,
+            line(pose, lines, x, y + at, z, x, y + at + mark, z,
                     red, green, blue, fade, lineWidth);
         }
     }

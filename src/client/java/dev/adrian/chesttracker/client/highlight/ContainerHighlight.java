@@ -146,13 +146,13 @@ public final class ContainerHighlight {
      * Growing it with distance keeps roughly the apparent size instead of
      * shrinking to nothing, so scanning a base for the box actually works.
      */
-    private static final double GROW_PER_BLOCK = 0.008;
+    private static final double GROW_PER_BLOCK = 0.004;
 
     /** Where "far" begins, and the box starts growing in earnest. */
     private static final double FAR_FROM = 200.0;
 
-    /** Growth per block past {@link #FAR_FROM}, five times the near rate. */
-    private static final double FAR_GROW_PER_BLOCK = 0.04;
+    /** Growth per block past {@link #FAR_FROM}. */
+    private static final double FAR_GROW_PER_BLOCK = 0.012;
 
     /**
      * Growth is snapped to this, and line width to a whole pixel.
@@ -176,14 +176,33 @@ public final class ContainerHighlight {
      */
     private static final double GROW_FROM = 24.0;
 
-    /** Past this the box is large enough to find from anywhere it is visible. */
-    private static final double MAX_GROW = 8.0;
+    /**
+     * Past this the box stops growing.
+     *
+     * <p>Halved, and both rates with it. The box is the precise part of the
+     * marker - it says which block - and once it is bigger than the building it
+     * has stopped saying that. The trail is what carries distance now, so the
+     * box does not have to.
+     */
+    private static final double MAX_GROW = 4.0;
 
     /** Below this the container is in plain sight and a beam only clutters it. */
     private static final double BEAM_MIN_DISTANCE = 8.0;
 
-    /** How far the trail of marks rises above its container. */
-    private static final double BEAM_HEIGHT = 32.0;
+    /**
+     * How far the trail of marks rises above its container up close.
+     *
+     * <p>This is the part that has to be seen from across a world, so it grows
+     * with distance rather than staying a fixed height: thirty-two blocks is a
+     * tall column at ten blocks and an invisible speck at a thousand.
+     */
+    private static final double BEAM_HEIGHT = 48.0;
+
+    /** Added to the trail's height per block of distance. */
+    private static final double BEAM_HEIGHT_PER_BLOCK = 0.6;
+
+    /** Tall enough to cross the sky; more would simply leave the world. */
+    private static final double MAX_BEAM_HEIGHT = 420.0;
 
     /**
      * How much of what is left to turn is taken each tick.
@@ -286,8 +305,10 @@ public final class ContainerHighlight {
             // The column is what carries at range, and the only part of this
             // that means anything where no terrain is drawn to place it.
             if (beams && distance > BEAM_MIN_DISTANCE) {
+                double beamHeight = Math.min(MAX_BEAM_HEIGHT,
+                        BEAM_HEIGHT + distance * BEAM_HEIGHT_PER_BLOCK);
                 HighlightBox.beam(pose, lines,
-                        drawX + 0.5, drawY + 1.5, drawZ + 0.5, BEAM_HEIGHT * pull,
+                        drawX + 0.5, drawY + 1.5, drawZ + 0.5, beamHeight * pull,
                         colour[0], colour[1], colour[2], 0.75f, width);
             }
             drawn++;

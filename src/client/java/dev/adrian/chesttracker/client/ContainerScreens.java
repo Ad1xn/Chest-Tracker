@@ -1,6 +1,7 @@
 package dev.adrian.chesttracker.client;
 
 import com.mojang.blaze3d.platform.InputConstants;
+import org.lwjgl.glfw.GLFW;
 import dev.adrian.chesttracker.ChestTracker;
 import dev.adrian.chesttracker.client.platform.ClientCompat;
 import dev.adrian.chesttracker.client.ui.SearchButton;
@@ -59,6 +60,12 @@ public final class ContainerScreens {
     private static boolean keyWasDown;
     private static long lastTrigger;
 
+    /** The button on the screen currently open, or null. */
+    private static SearchButton button;
+
+    private static boolean rightWasDown;
+    private static boolean draggingButton;
+
     /** Logged once, to settle whether screen init events arrive here at all. */
     private static boolean reportedInit;
 
@@ -71,10 +78,12 @@ public final class ContainerScreens {
             // init() has already run, so the window's position is settled.
             ContainerScreenAccessor access = (ContainerScreenAccessor) container;
 
+            button = null;
             if (ChestTrackerConfig.get().containerSearchButton) {
-                ClientCompat.addWidget(screen, new SearchButton(
+                button = new SearchButton(
                         access.chesttracker$leftPos() + access.chesttracker$imageWidth(),
-                        access.chesttracker$topPos()));
+                        access.chesttracker$topPos());
+                ClientCompat.addWidget(screen, button);
             }
 
             if (!reportedInit) {
@@ -120,6 +129,51 @@ public final class ContainerScreens {
 
         if (down && !keyWasDown) trigger(container, "poll");
         keyWasDown = down;
+
+        dragButton(client);
+    }
+
+    /**
+     * Moves the search button while the right mouse button is held on it.
+     *
+     * <p>Polled, like the key, and for the same reason: a container screen
+     * handles dragging for its own quick-craft and never forwards a right-drag
+     * to its widgets, so the widget's own drag callbacks never arrive. Reading
+     * the mouse asks nobody's permission.
+     */
+    private static void dragButton(Minecraft client) {
+        SearchButton target = button;
+        if (target == null || client.getWindow() == null) {
+            rightWasDown = false;
+            draggingButton = false;
+            return;
+        }
+
+        boolean down = GLFW.glfwGetMouseButton(
+                client.getWindow().handle(), GLFW.GLFW_MOUSE_BUTTON_RIGHT) == GLFW.GLFW_PRESS;
+
+        // The mouse is in real pixels; widgets live in GUI-scaled ones.
+        double scaleX = client.getWindow().getGuiScaledWidth()
+                / (double) client.getWindow().getScreenWidth();
+        double scaleY = client.getWindow().getGuiScaledHeight()
+                / (double) client.getWindow().getScreenHeight();
+        int mouseX = (int) (client.mouseHandler.xpos() * scaleX);
+        int mouseY = (int) (client.mouseHandler.ypos() * scaleY);
+
+        if (down && !rightWasDown && target.isMouseOver(mouseX, mouseY)) draggingButton = true;
+        if (draggingButton && down) {
+            target.setX(mouseX - SearchButton.SIZE / 2);
+            target.setY(mouseY - SearchButton.SIZE / 2);
+        }
+        if (draggingButton && !down) {
+            draggingButton = false;
+            // Written once on release rather than on every frame of the drag.
+            ChestTrackerConfig config = ChestTrackerConfig.get();
+            config.searchButtonX = target.getX() - target.anchorX();
+            config.searchButtonY = target.getY() - target.anchorY();
+            config.save();
+        }
+        rightWasDown = down;
     }
 
     /**

@@ -4,6 +4,7 @@ import dev.adrian.chesttracker.client.platform.Gfx;
 import dev.adrian.chesttracker.config.ChestTrackerConfig;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.network.chat.Component;
 
 //? if >=26.1 {
@@ -15,23 +16,39 @@ import net.minecraft.client.gui.GuiGraphics;
 /**
  * Picks the two colours the in-world markers are drawn in.
  *
- * <p>Its own screen rather than six more rows on the settings page, which had
- * already grown a second column. Sliders rather than a colour wheel: a wheel is
- * a lot of drawing code for a choice made once, and channels are what the value
- * actually is - the config file stores {@code 0xRRGGBB} and this is a legible
- * way to reach it.
+ * <p>A palette, not channel sliders. Three sliders is the colour a programmer
+ * would offer and nobody would use: it asks the player to know what a colour is
+ * made of in order to choose one. Swatches ask them to point at the one they
+ * want.
  *
- * <p>A swatch of each colour sits beside its sliders, because three numbers are
- * not a colour to anyone reading them.
+ * <p>The colours offered are deliberately not a uniform spread of the spectrum.
+ * They are the ones that survive being drawn over Minecraft - saturated and
+ * bright, skipping the sky blues and the sun yellows and the greens that sit in
+ * grass, because a marker's whole job is to not be the background.
  */
 public final class HighlightColourScreen extends Screen {
 
-    private static final int ROW_HEIGHT = 22;
-    private static final int SLIDER_WIDTH = 180;
-    private static final int SWATCH = 40;
+    /**
+     * Colours worth marking something with.
+     *
+     * <p>Two rows of eight. The first is the bright end, for the nearest match;
+     * the second the same hues softened, which reads as "and also these" beside
+     * the first rather than competing with it.
+     */
+    private static final int[] PALETTE = {
+            0xFF2BD0, 0xFF3B7A, 0xFF6A2B, 0xFFC400, 0x9CFF2B, 0x2BFF9C, 0x2BE5FF, 0xB478FF,
+            0xC41FA0, 0xC42F5F, 0xC4521F, 0xC49600, 0x78C41F, 0x1FC478, 0x1FAFC4, 0x8A5AC4,
+    };
+
+    private static final int SWATCH = 18;
+    private static final int SWATCH_GAP = 3;
+    private static final int COLUMNS = 8;
 
     private final Screen parent;
     private final ChestTrackerConfig config = ChestTrackerConfig.get();
+
+    /** Which of the two colours a click on the palette will set. */
+    private boolean editingNearest = true;
 
     public HighlightColourScreen(Screen parent) {
         super(Component.literal("Highlight colours"));
@@ -40,86 +57,112 @@ public final class HighlightColourScreen extends Screen {
 
     @Override
     protected void init() {
-        int x = width / 2 - SLIDER_WIDTH / 2 + SWATCH / 2;
-        int y = 46;
-
-        y = channels(x, y, true);
-        y += 12;
-        y = channels(x, y, false);
+        int y = paletteTop() + rows() * (SWATCH + SWATCH_GAP) + 10;
 
         addRenderableWidget(Button.builder(Component.literal("Reset to defaults"), button -> {
             ChestTrackerConfig fresh = new ChestTrackerConfig();
             config.nearestColour = fresh.nearestColour;
             config.otherColour = fresh.otherColour;
-            rebuildWidgets();
-        }).bounds(width / 2 - 100, y + 6, 95, 20).build());
+        }).bounds(width / 2 - 100, y, 95, 20).build());
 
         addRenderableWidget(Button.builder(Component.literal("Done"), button -> onClose())
-                .bounds(width / 2 + 5, y + 6, 95, 20).build());
+                .bounds(width / 2 + 5, y, 95, 20).build());
     }
 
-    /** One row of red, green and blue for one of the two colours. */
-    private int channels(int x, int y, boolean nearest) {
-        for (int shift : new int[] {16, 8, 0}) {
-            addRenderableWidget(new ChannelSlider(x, y, shift, nearest));
-            y += ROW_HEIGHT;
+    private static int rows() {
+        return (PALETTE.length + COLUMNS - 1) / COLUMNS;
+    }
+
+    private int paletteWidth() {
+        return COLUMNS * SWATCH + (COLUMNS - 1) * SWATCH_GAP;
+    }
+
+    private int paletteLeft() {
+        return width / 2 - paletteWidth() / 2;
+    }
+
+    private int paletteTop() {
+        return 82;
+    }
+
+    /** The two big swatches at the top, which are also the pair of tabs. */
+    private int targetX(boolean nearest) {
+        return width / 2 - 62 + (nearest ? 0 : 64);
+    }
+
+    private static final int TARGET_Y = 34;
+    private static final int TARGET_W = 60;
+    private static final int TARGET_H = 34;
+
+    private void draw(Gfx gfx, int mouseX, int mouseY) {
+        centred(gfx, "Highlight colours", 14, 0xFFFFFFFF);
+
+        for (boolean nearest : new boolean[] {true, false}) {
+            int x = targetX(nearest);
+            int colour = nearest ? config.nearestColour : config.otherColour;
+            boolean active = nearest == editingNearest;
+
+            gfx.fill(x - 2, TARGET_Y - 2, x + TARGET_W + 2, TARGET_Y + TARGET_H + 2,
+                    active ? 0xFFFFFFFF : 0xFF3A3A3A);
+            gfx.fill(x, TARGET_Y, x + TARGET_W, TARGET_Y + TARGET_H, 0xFF000000 | colour);
+
+            String label = nearest ? "Nearest" : "Others";
+            gfx.text(font, Component.literal(label),
+                    x + TARGET_W / 2 - font.width(label) / 2, TARGET_Y + TARGET_H + 5,
+                    active ? 0xFFFFFFFF : 0xFFA0A0A0);
         }
-        return y;
-    }
 
-    private int colourOf(boolean nearest) {
-        return nearest ? config.nearestColour : config.otherColour;
-    }
+        int left = paletteLeft();
+        int top = paletteTop();
+        for (int i = 0; i < PALETTE.length; i++) {
+            int x = left + (i % COLUMNS) * (SWATCH + SWATCH_GAP);
+            int y = top + (i / COLUMNS) * (SWATCH + SWATCH_GAP);
+            boolean hovered = mouseX >= x && mouseX < x + SWATCH && mouseY >= y && mouseY < y + SWATCH;
+            boolean chosen = PALETTE[i] == (editingNearest ? config.nearestColour : config.otherColour);
 
-    private void setColour(boolean nearest, int value) {
-        if (nearest) {
-            config.nearestColour = value;
-        } else {
-            config.otherColour = value;
-        }
-    }
-
-    private final class ChannelSlider extends ConfigScreen.IntSlider {
-
-        private final int shift;
-        private final boolean nearest;
-
-        ChannelSlider(int x, int y, int shift, boolean nearest) {
-            super(x, y, SLIDER_WIDTH, (colourOf(nearest) >> shift) & 0xFF, 0, 255, 1);
-            this.shift = shift;
-            this.nearest = nearest;
-            updateMessage();
+            if (chosen || hovered) {
+                gfx.fill(x - 2, y - 2, x + SWATCH + 2, y + SWATCH + 2,
+                        chosen ? 0xFFFFFFFF : 0xFFB0B0B0);
+            }
+            gfx.fill(x, y, x + SWATCH, y + SWATCH, 0xFF000000 | PALETTE[i]);
         }
 
-        @Override
-        String label(int value) {
-            String channel = switch (shift) {
-                case 16 -> "Red";
-                case 8 -> "Green";
-                default -> "Blue";
-            };
-            return (nearest ? "Nearest " : "Others ") + channel + ": " + value;
-        }
-
-        @Override
-        void apply(int value) {
-            int packed = colourOf(nearest) & ~(0xFF << shift);
-            setColour(nearest, packed | (value << shift));
-        }
+        centred(gfx, "Pick a swatch to set the colour shown above", paletteTop() - 14, 0xFFA0A0A0);
     }
 
-    private void draw(Gfx gfx) {
-        gfx.text(font, Component.literal("Highlight colours"),
-                width / 2 - font.width("Highlight colours") / 2, 18, 0xFFFFFFFF);
-
-        int x = width / 2 - SLIDER_WIDTH / 2 - SWATCH / 2 - 6;
-        swatch(gfx, x, 46, config.nearestColour);
-        swatch(gfx, x, 46 + ROW_HEIGHT * 3 + 12, config.otherColour);
+    private void centred(Gfx gfx, String text, int y, int colour) {
+        gfx.text(font, Component.literal(text), width / 2 - font.width(text) / 2, y, colour);
     }
 
-    private void swatch(Gfx gfx, int x, int y, int colour) {
-        gfx.fill(x - 1, y - 1, x + SWATCH + 1, y + SWATCH + 1, 0xFF000000);
-        gfx.fill(x, y, x + SWATCH, y + SWATCH, 0xFF000000 | colour);
+    @Override
+    public boolean mouseClicked(MouseButtonEvent event, boolean doubleClick) {
+        int mouseX = (int) event.x();
+        int mouseY = (int) event.y();
+
+        for (boolean nearest : new boolean[] {true, false}) {
+            int x = targetX(nearest);
+            if (mouseX >= x && mouseX < x + TARGET_W
+                    && mouseY >= TARGET_Y && mouseY < TARGET_Y + TARGET_H) {
+                editingNearest = nearest;
+                return true;
+            }
+        }
+
+        int left = paletteLeft();
+        int top = paletteTop();
+        for (int i = 0; i < PALETTE.length; i++) {
+            int x = left + (i % COLUMNS) * (SWATCH + SWATCH_GAP);
+            int y = top + (i / COLUMNS) * (SWATCH + SWATCH_GAP);
+            if (mouseX >= x && mouseX < x + SWATCH && mouseY >= y && mouseY < y + SWATCH) {
+                if (editingNearest) {
+                    config.nearestColour = PALETTE[i];
+                } else {
+                    config.otherColour = PALETTE[i];
+                }
+                return true;
+            }
+        }
+        return super.mouseClicked(event, doubleClick);
     }
 
     @Override
@@ -132,13 +175,13 @@ public final class HighlightColourScreen extends Screen {
     /*@Override
     public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float partialTick) {
         super.extractRenderState(graphics, mouseX, mouseY, partialTick);
-        draw(new Gfx(graphics));
+        draw(new Gfx(graphics), mouseX, mouseY);
     }
     *///?} else {
     @Override
     public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
         super.render(graphics, mouseX, mouseY, partialTick);
-        draw(new Gfx(graphics));
+        draw(new Gfx(graphics), mouseX, mouseY);
     }
     //?}
 }
