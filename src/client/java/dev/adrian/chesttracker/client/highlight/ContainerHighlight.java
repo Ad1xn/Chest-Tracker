@@ -146,13 +146,13 @@ public final class ContainerHighlight {
      * Growing it with distance keeps roughly the apparent size instead of
      * shrinking to nothing, so scanning a base for the box actually works.
      */
-    private static final double GROW_PER_BLOCK = 0.004;
+    private static final double GROW_PER_BLOCK = 0.002;
 
     /** Where "far" begins, and the box starts growing in earnest. */
     private static final double FAR_FROM = 200.0;
 
     /** Growth per block past {@link #FAR_FROM}. */
-    private static final double FAR_GROW_PER_BLOCK = 0.012;
+    private static final double FAR_GROW_PER_BLOCK = 0.004;
 
     /**
      * Growth is snapped to this, and line width to a whole pixel.
@@ -164,7 +164,7 @@ public final class ContainerHighlight {
      * how it was reported. Snapping means it changes in occasional steps
      * instead, and holds still in between.
      */
-    private static final double GROW_STEP = 0.5;
+    private static final double GROW_STEP = 0.25;
 
     /**
      * Distance at which a box starts growing at all.
@@ -179,12 +179,14 @@ public final class ContainerHighlight {
     /**
      * Past this the box stops growing.
      *
-     * <p>Halved, and both rates with it. The box is the precise part of the
-     * marker - it says which block - and once it is bigger than the building it
-     * has stopped saying that. The trail is what carries distance now, so the
-     * box does not have to.
+     * <p>Cut hard, twice. The box is the precise half of a marker: it says
+     * which block, and a box that fills the screen from four hundred blocks
+     * away says nothing at all - it is not a bigger answer, it is a lost one.
+     * Distance is the trail's job, and the trail is what was supposed to grow.
+     * Three quarters of a block of swell is enough to keep the outline from
+     * collapsing into a dot without it ever stopping being a box.
      */
-    private static final double MAX_GROW = 4.0;
+    private static final double MAX_GROW = 0.75;
 
     /** Below this the container is in plain sight and a beam only clutters it. */
     private static final double BEAM_MIN_DISTANCE = 8.0;

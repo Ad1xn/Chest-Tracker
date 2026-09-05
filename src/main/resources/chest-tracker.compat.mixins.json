@@ -1,0 +1,13 @@
+{
+  "required": false,
+  "minVersion": "0.8",
+  "package": "dev.adrian.chesttracker.mixin.client.compat",
+  "compatibilityLevel": "${mixin_compat}",
+  "plugin": "dev.adrian.chesttracker.mixin.client.compat.ChestTrackerCompatPlugin",
+  "client": [
+    "PreviewRendererMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 0
+  }
+}
