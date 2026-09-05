@@ -165,6 +165,43 @@ class PayloadCodecTest {
     }
 
     @Test
+    void statusResponseSurvivesTheRoundTrip() {
+        QueryDto.StatusResponse original = new QueryDto.StatusResponse(11, true, 3, 40, 512, List.of(
+                new QueryDto.DimensionSummary("minecraft:overworld", 120),
+                new QueryDto.DimensionSummary("minecraft:the_nether", 4)));
+
+        FriendlyByteBuf buf = buffer();
+        ChestTrackerPayloads.StatusResponsePayload.CODEC.encode(
+                buf, new ChestTrackerPayloads.StatusResponsePayload(original));
+        QueryDto.StatusResponse decoded =
+                ChestTrackerPayloads.StatusResponsePayload.CODEC.decode(buf).response();
+
+        assertEquals(original, decoded);
+        assertEquals(0, buf.readableBytes(), "codec must consume exactly what it wrote");
+    }
+
+    @Test
+    void statusProgressIsZeroUntilTheTotalIsKnown() {
+        // The scanner counts regions against a total it only learns after
+        // walking the directory, so a bar driven by this must not divide by it.
+        assertEquals(0.0f, new QueryDto.StatusResponse(1, true, 5, 0, 90, List.of()).progress());
+        assertEquals(0.5f, new QueryDto.StatusResponse(1, true, 5, 10, 90, List.of()).progress());
+    }
+
+    @Test
+    void aRequestCarriesTheDimensionItMeans() {
+        QueryDto.ContainerRequest original = new QueryDto.ContainerRequest(
+                4, "minecraft:diamond", QueryDto.Filters.defaults(), 8, "minecraft:the_end");
+
+        FriendlyByteBuf buf = buffer();
+        ChestTrackerPayloads.ContainerRequestPayload.CODEC.encode(
+                buf, new ChestTrackerPayloads.ContainerRequestPayload(original));
+
+        assertEquals(original, ChestTrackerPayloads.ContainerRequestPayload.CODEC.decode(buf).request());
+        assertEquals(0, buf.readableBytes());
+    }
+
+    @Test
     void anOutOfRangeOriginOffTheWireDecodesToAnyRatherThanThrowing() {
         FriendlyByteBuf buf = buffer();
         buf.writeVarInt(1);        // request id
@@ -173,11 +210,13 @@ class PayloadCodecTest {
         buf.writeBoolean(false);   // includeMachines
         buf.writeVarInt(9999);     // origin filter, not a value we ever send
         buf.writeVarInt(10);       // limit
+        buf.writeUtf("");          // dimension, blank meaning "where I am"
 
         QueryDto.SummaryRequest decoded =
                 ChestTrackerPayloads.SummaryRequestPayload.CODEC.decode(buf).request();
 
         assertEquals(QueryDto.Filters.ORIGIN_ANY, decoded.filters().originFilter());
+        assertEquals("", decoded.dimensionId());
         assertEquals(0, buf.readableBytes());
     }
 }

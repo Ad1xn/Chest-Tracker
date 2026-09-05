@@ -81,7 +81,24 @@ public final class QueryDto {
      * @param requestId caller's correlation id
      * @param text      free text matched against item ids; blank means everything
      */
-    public record SummaryRequest(int requestId, String text, Filters filters, int limit) {}
+    /**
+     * @param dimensionId which index to search; blank means the one the player
+     *                    is standing in. Sent so the screen can look at the
+     *                    Nether from the overworld, which is most of the point
+     *                    of knowing the Nether has anything in it
+     */
+    public record SummaryRequest(int requestId, String text, Filters filters, int limit,
+                                 String dimensionId) {
+
+        public SummaryRequest {
+            if (dimensionId == null) dimensionId = "";
+        }
+
+        /** The common case: whichever dimension the player is in. */
+        public SummaryRequest(int requestId, String text, Filters filters, int limit) {
+            this(requestId, text, filters, limit, "");
+        }
+    }
 
     /**
      * One item, totalled across the containers holding it.
@@ -122,7 +139,17 @@ public final class QueryDto {
     }
 
     /** Ask where one item is. */
-    public record ContainerRequest(int requestId, String itemId, Filters filters, int limit) {}
+    public record ContainerRequest(int requestId, String itemId, Filters filters, int limit,
+                                   String dimensionId) {
+
+        public ContainerRequest {
+            if (dimensionId == null) dimensionId = "";
+        }
+
+        public ContainerRequest(int requestId, String itemId, Filters filters, int limit) {
+            this(requestId, itemId, filters, limit, "");
+        }
+    }
 
     /**
      * One container holding the requested item.
@@ -148,6 +175,50 @@ public final class QueryDto {
         }
     }
 
+    /** Ask what the index holds and whether it is still filling. */
+    public record StatusRequest(int requestId) {}
+
+    /**
+     * One dimension the index knows something about.
+     *
+     * @param dimensionId the dimension's registry id
+     * @param containers  how many containers are indexed there
+     */
+    public record DimensionSummary(String dimensionId, int containers) {}
+
+    /**
+     * What the index holds, and whether it is still filling.
+     *
+     * <p>Both halves matter to a player looking at an empty screen: "nothing
+     * here" and "nothing here yet" are different answers, and only one of them
+     * means come back in a minute.
+     *
+     * @param scanning     whether an offline region scan is running
+     * @param regionsRead  region files read so far, which is what the scanner
+     *                     actually counts against a known total
+     * @param regionsTotal region files it expects to read, 0 before it knows
+     * @param chunksRead   chunks read so far, for saying something concrete
+     *                     while the fraction is still zero
+     * @param dimensions   every dimension with at least one container indexed
+     */
+    public record StatusResponse(int requestId, boolean scanning,
+                                 int regionsRead, int regionsTotal, int chunksRead,
+                                 List<DimensionSummary> dimensions) {
+
+        public StatusResponse {
+            dimensions = dimensions == null ? List.of() : List.copyOf(dimensions);
+        }
+
+        public static StatusResponse empty(int requestId) {
+            return new StatusResponse(requestId, false, 0, 0, 0, List.of());
+        }
+
+        /** 0..1, or 0 when the total is not known yet. */
+        public float progress() {
+            return regionsTotal <= 0 ? 0.0f : Math.min(1.0f, regionsRead / (float) regionsTotal);
+        }
+    }
+
     /**
      * Sent unprompted by a server that has the mod, once the player is in.
      *
@@ -166,12 +237,13 @@ public final class QueryDto {
         /**
          * Bumped when the payload shapes change incompatibly.
          *
-         * <p>3 added a nested count to every item summary. Two peers that
+         * <p>4 added a dimension to both requests and a status route. 3 added
+         * a nested count to every item summary. Two peers that
          * disagree about a payload's shape while both claiming the same
          * version do not fail, they desync - the reader takes the next field
          * from the middle of the previous one - so this has to move whenever a
          * field does.
          */
-        public static final int PROTOCOL_VERSION = 3;
+        public static final int PROTOCOL_VERSION = 4;
     }
 }

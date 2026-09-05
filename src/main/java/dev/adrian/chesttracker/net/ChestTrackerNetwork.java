@@ -63,7 +63,13 @@ public final class ChestTrackerNetwork {
         NetworkCompat.playC2S().register(
                 ChestTrackerPayloads.SubscribePayload.TYPE,
                 ChestTrackerPayloads.SubscribePayload.CODEC);
+        NetworkCompat.playC2S().register(
+                ChestTrackerPayloads.StatusRequestPayload.TYPE,
+                ChestTrackerPayloads.StatusRequestPayload.CODEC);
 
+        NetworkCompat.playS2C().register(
+                ChestTrackerPayloads.StatusResponsePayload.TYPE,
+                ChestTrackerPayloads.StatusResponsePayload.CODEC);
         NetworkCompat.playS2C().register(
                 ChestTrackerPayloads.SummaryResponsePayload.TYPE,
                 ChestTrackerPayloads.SummaryResponsePayload.CODEC);
@@ -107,6 +113,17 @@ public final class ChestTrackerNetwork {
                     QueryDto.ContainerResponse response =
                             QueryService.containers(tracker, player, payload.request(), access());
                     send(player, new ChestTrackerPayloads.ContainerResponsePayload(response));
+                });
+
+        ServerPlayNetworking.registerGlobalReceiver(
+                ChestTrackerPayloads.StatusRequestPayload.TYPE,
+                (payload, context) -> {
+                    ServerPlayer player = context.player();
+                    TrackerService tracker = Trackers.current();
+                    if (tracker == null) return;
+                    QueryDto.StatusResponse response =
+                            QueryService.status(tracker, player, payload.request(), access());
+                    send(player, new ChestTrackerPayloads.StatusResponsePayload(response));
                 });
 
         ServerPlayNetworking.registerGlobalReceiver(

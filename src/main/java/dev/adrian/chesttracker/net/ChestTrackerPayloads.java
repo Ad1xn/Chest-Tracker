@@ -86,9 +86,11 @@ public final class ChestTrackerPayloads {
                             buf.writeUtf(request.text() == null ? "" : request.text(), MAX_TEXT);
                             writeFilters(buf, request.filters());
                             buf.writeVarInt(request.limit());
+                            buf.writeUtf(request.dimensionId(), MAX_ID);
                         },
                         buf -> new SummaryRequestPayload(new QueryDto.SummaryRequest(
-                                buf.readVarInt(), buf.readUtf(MAX_TEXT), readFilters(buf), buf.readVarInt())));
+                                buf.readVarInt(), buf.readUtf(MAX_TEXT), readFilters(buf),
+                                buf.readVarInt(), buf.readUtf(MAX_ID))));
 
         @Override
         public Type<? extends CustomPacketPayload> type() {
@@ -131,6 +133,54 @@ public final class ChestTrackerPayloads {
         }
     }
 
+    // --- Status -------------------------------------------------------------
+
+    public record StatusRequestPayload(QueryDto.StatusRequest request) implements CustomPacketPayload {
+
+        public static final Type<StatusRequestPayload> TYPE = new Type<>(id("status_request"));
+
+        public static final StreamCodec<FriendlyByteBuf, StatusRequestPayload> CODEC =
+                StreamCodec.of(
+                        (buf, payload) -> buf.writeVarInt(payload.request().requestId()),
+                        buf -> new StatusRequestPayload(new QueryDto.StatusRequest(buf.readVarInt())));
+
+        @Override
+        public Type<? extends CustomPacketPayload> type() {
+            return TYPE;
+        }
+    }
+
+    public record StatusResponsePayload(QueryDto.StatusResponse response) implements CustomPacketPayload {
+
+        public static final Type<StatusResponsePayload> TYPE = new Type<>(id("status_response"));
+
+        public static final StreamCodec<FriendlyByteBuf, StatusResponsePayload> CODEC =
+                StreamCodec.of(
+                        (buf, payload) -> {
+                            QueryDto.StatusResponse response = payload.response();
+                            buf.writeVarInt(response.requestId());
+                            buf.writeBoolean(response.scanning());
+                            buf.writeVarInt(response.regionsRead());
+                            buf.writeVarInt(response.regionsTotal());
+                            buf.writeVarInt(response.chunksRead());
+                            buf.writeVarInt(response.dimensions().size());
+                            for (QueryDto.DimensionSummary dimension : response.dimensions()) {
+                                buf.writeUtf(dimension.dimensionId(), MAX_ID);
+                                buf.writeVarInt(dimension.containers());
+                            }
+                        },
+                        buf -> new StatusResponsePayload(new QueryDto.StatusResponse(
+                                buf.readVarInt(), buf.readBoolean(),
+                                buf.readVarInt(), buf.readVarInt(), buf.readVarInt(),
+                                readList(buf, b -> new QueryDto.DimensionSummary(
+                                        b.readUtf(MAX_ID), b.readVarInt())))));
+
+        @Override
+        public Type<? extends CustomPacketPayload> type() {
+            return TYPE;
+        }
+    }
+
     // --- Containers ---------------------------------------------------------
 
     /** Client asks where one item is. */
@@ -146,9 +196,11 @@ public final class ChestTrackerPayloads {
                             buf.writeUtf(request.itemId() == null ? "" : request.itemId(), MAX_ID);
                             writeFilters(buf, request.filters());
                             buf.writeVarInt(request.limit());
+                            buf.writeUtf(request.dimensionId(), MAX_ID);
                         },
                         buf -> new ContainerRequestPayload(new QueryDto.ContainerRequest(
-                                buf.readVarInt(), buf.readUtf(MAX_ID), readFilters(buf), buf.readVarInt())));
+                                buf.readVarInt(), buf.readUtf(MAX_ID), readFilters(buf),
+                                buf.readVarInt(), buf.readUtf(MAX_ID))));
 
         @Override
         public Type<? extends CustomPacketPayload> type() {
