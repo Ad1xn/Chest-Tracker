@@ -50,14 +50,10 @@ public final class ContainerScreens {
 
     private ContainerScreens() {}
 
-    /**
-     * Long enough that the two routes cannot both answer one press, short
-     * enough that deliberately pressing again still works.
-     */
+    /** Short enough that pressing again works, long enough to swallow a repeat. */
     private static final long DEBOUNCE_MS = 300;
 
     private static KeyMapping searchKey;
-    private static boolean keyWasDown;
     private static long lastTrigger;
 
     /** The button on the screen currently open, or null. */
@@ -96,41 +92,20 @@ public final class ContainerScreens {
                     SlotHighlight.draw(gfx, container,
                             access.chesttracker$leftPos(), access.chesttracker$topPos()));
 
-            ScreenKeyboardEvents.beforeKeyPress(screen).register((ignored, keyEvent) -> {
-                if (searchHovered.matches(keyEvent)) trigger(container, "screen event");
+            // "allow" rather than "before", so a match is also swallowed. The
+            // key reaches nothing else in the screen after this, which is what
+            // stops a second binding on the same key firing behind it.
+            ScreenKeyboardEvents.allowKeyPress(screen).register((ignored, keyEvent) -> {
+                if (!searchHovered.matches(keyEvent)) return true;
+                trigger(container);
+                return false;
             });
         });
     }
 
-    /**
-     * The polled route, from the client tick.
-     *
-     * <p>Reads the window rather than any event, so it is unaffected by whoever
-     * else is handling input. Edge-triggered: holding the key searches once.
-     */
+    /** Per-tick work: only the button drag, which has no event to listen to. */
     public static void tick() {
-        Minecraft client = Minecraft.getInstance();
-        // Asked of the game directly rather than remembered from an event, so
-        // this works even where the screen events do not arrive.
-        AbstractContainerScreen<?> container =
-                ClientCompat.currentScreen() instanceof AbstractContainerScreen<?> open ? open : null;
-        if (container == null || searchKey == null || client.getWindow() == null) {
-            // Reset outside a container, so reopening one with the key already
-            // held is not mistaken for a fresh press.
-            keyWasDown = false;
-            return;
-        }
-
-        InputConstants.Key key = ((KeyMappingAccessor) searchKey).chesttracker$key();
-        boolean down = key != null
-                && key.getType() == InputConstants.Type.KEYSYM
-                && key.getValue() >= 0
-                && InputConstants.isKeyDown(client.getWindow(), key.getValue());
-
-        if (down && !keyWasDown) trigger(container, "poll");
-        keyWasDown = down;
-
-        dragButton(client);
+        dragButton(Minecraft.getInstance());
     }
 
     /**
@@ -176,19 +151,11 @@ public final class ContainerScreens {
         rightWasDown = down;
     }
 
-    /**
-     * Searches for whatever the cursor is over.
-     *
-     * @param via which route delivered the key, logged once per search so the
-     *            answer to "does this environment deliver screen key events"
-     *            ends up in the log rather than in somebody's guess
-     */
-    private static void trigger(AbstractContainerScreen<?> container, String via) {
+    /** Searches for whatever the cursor is over. */
+    private static void trigger(AbstractContainerScreen<?> container) {
         long now = System.currentTimeMillis();
         if (now - lastTrigger < DEBOUNCE_MS) return;
         lastTrigger = now;
-
-        ChestTracker.LOG.info("Container search key fired via {}", via);
 
         // Requiring a hovered stack is also what keeps this from firing while
         // somebody types a Z into an anvil or the creative search: the cursor

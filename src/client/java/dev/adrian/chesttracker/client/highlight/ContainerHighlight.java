@@ -62,8 +62,11 @@ public final class ContainerHighlight {
      */
     private String searchedItemId;
 
-    /** Counts down while the view is being turned towards the nearest match. */
-    private int turnTicksLeft;
+    /** Seconds of turning left, counted down per frame. */
+    private float turnSecondsLeft;
+
+    /** When the last frame of turning was, for measuring the one after it. */
+    private long turnLastFrameAt;
 
     /**
      * Beyond this a marker is not worth drawing.
@@ -119,7 +122,8 @@ public final class ContainerHighlight {
         LocalPlayer player = Minecraft.getInstance().player;
         double distance = player == null ? 0 : distanceTo(player);
         timer.start(distance, System.currentTimeMillis());
-        turnTicksLeft = ChestTrackerConfig.get().turnToTarget ? TURN_MAX_TICKS : 0;
+        turnSecondsLeft = ChestTrackerConfig.get().turnToTarget ? TURN_MAX_SECONDS : 0.0f;
+        turnLastFrameAt = System.nanoTime();
     }
 
     public void clear() {
@@ -207,32 +211,34 @@ public final class ContainerHighlight {
     private static final double MAX_BEAM_HEIGHT = 420.0;
 
     /**
-     * How much of what is left to turn is taken each tick.
+     * How much of what is left to turn is taken per second.
      *
-     * <p>A fraction of the remainder rather than a fixed share of a fixed
-     * number of ticks: the turn slows as it arrives instead of stopping dead,
-     * and because the step shrinks with the gap, the last few ticks move the
-     * view by less than the eye can catch. The previous version divided the
-     * remaining angle by the remaining ticks, which is a constant speed with a
-     * hard stop at the end - the part that looked wrong.
+     * <p>Per second, and applied per frame, because a turn driven from the game
+     * tick moves the view twenty times a second however fast the game is
+     * drawing. Vanilla's own interpolation hides some of that but not the
+     * change in speed, which is what still read as steppy at a hundred frames a
+     * second. Framerate now changes how smooth it looks, not how fast it turns.
      */
-    private static final float TURN_EASE = 0.28f;
+    private static final float TURN_EASE_PER_SECOND = 6.0f;
 
     /** Close enough to stop turning; below this the correction is invisible. */
     private static final float TURN_DONE_DEGREES = 0.75f;
 
     /**
-     * The most the view may swing in one tick.
+     * The fastest the view may swing, in degrees a second.
      *
      * <p>Easing alone still snapped: a quarter of a hundred-and-eighty degree
-     * gap is forty-five degrees in a single tick, and no amount of smoothing
-     * after that hides the first step. Capping the speed makes a long turn
-     * take longer rather than start violently.
+     * gap is a huge first step, and no amount of smoothing after that hides it.
+     * Capping the speed makes a long turn take longer rather than start
+     * violently.
      */
-    private static final float TURN_MAX_STEP = 7.0f;
+    private static final float TURN_MAX_PER_SECOND = 150.0f;
+
+    /** A frame longer than this is a stutter; treat it as one frame's worth. */
+    private static final float MAX_FRAME_SECONDS = 0.1f;
 
     /** A turn is abandoned after this, so it can never fight the mouse for long. */
-    private static final int TURN_MAX_TICKS = 30;
+    private static final float TURN_MAX_SECONDS = 1.5f;
 
     private static final float BASE_LINE_WIDTH = 2.0f;
     private static final float LINE_WIDTH_PER_BLOCK = 0.02f;
@@ -353,8 +359,20 @@ public final class ContainerHighlight {
      * disorienting, and a player who was already turning finds themselves
      * fighting it. Short enough to be over before it feels like a fight.
      */
-    private void turnTowards(LocalPlayer player) {
-        if (turnTicksLeft <= 0) return;
+    public void turnTowardsTarget() {
+        if (turnSecondsLeft <= 0.0f) return;
+
+        LocalPlayer player = Minecraft.getInstance().player;
+        if (player == null || positions.isEmpty() || !timer.isActive()) {
+            turnSecondsLeft = 0.0f;
+            return;
+        }
+
+        long now = System.nanoTime();
+        float seconds = Math.min(MAX_FRAME_SECONDS, (now - turnLastFrameAt) / 1_000_000_000.0f);
+        turnLastFrameAt = now;
+        if (seconds <= 0.0f) return;
+        turnSecondsLeft -= seconds;
 
         double dx = BlockKey.x(pos) + 0.5 - player.getX();
         double dy = BlockKey.y(pos) + 0.5 - player.getEyeY();
@@ -368,18 +386,21 @@ public final class ContainerHighlight {
         float yawGap = Mth.wrapDegrees(wantYaw - player.getYRot());
         float pitchGap = wantPitch - player.getXRot();
 
-        // Arrived. Stopping here rather than nudging for another twenty ticks
-        // is what keeps it from feeling like the mouse is being held.
+        // Arrived. Stopping here rather than nudging on for another second is
+        // what keeps it from feeling like the mouse is being held.
         if (Math.abs(yawGap) < TURN_DONE_DEGREES && Math.abs(pitchGap) < TURN_DONE_DEGREES) {
-            turnTicksLeft = 0;
+            turnSecondsLeft = 0.0f;
             return;
         }
 
-        player.setYRot(player.getYRot()
-                + Mth.clamp(yawGap * TURN_EASE, -TURN_MAX_STEP, TURN_MAX_STEP));
-        player.setXRot(player.getXRot()
-                + Mth.clamp(pitchGap * TURN_EASE, -TURN_MAX_STEP, TURN_MAX_STEP));
-        turnTicksLeft--;
+        // The ease is expressed per second and converted for this frame's
+        // length, so the curve is the same at thirty frames a second as at two
+        // hundred - only the number of steps along it changes.
+        float ease = Math.min(1.0f, TURN_EASE_PER_SECOND * seconds);
+        float limit = TURN_MAX_PER_SECOND * seconds;
+
+        player.setYRot(player.getYRot() + Mth.clamp(yawGap * ease, -limit, limit));
+        player.setXRot(player.getXRot() + Mth.clamp(pitchGap * ease, -limit, limit));
     }
 
     /**
@@ -429,7 +450,6 @@ public final class ContainerHighlight {
         // Walking past one of them makes another the nearest; the arrow should
         // follow rather than keep pointing behind.
         followNearest(player);
-        turnTowards(player);
 
         double distance = distanceTo(player);
         if (!timer.update(distance, System.currentTimeMillis())) {

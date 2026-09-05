@@ -38,6 +38,9 @@ public final class WorldHighlightHook {
         //? if >=26.1 {
         /*net.fabricmc.fabric.api.client.rendering.v1.level.LevelRenderEvents.AFTER_TRANSLUCENT_TERRAIN
                 .register(context -> {
+                    // Per frame, and before the early return: a turn has to run
+                    // whether or not there are boxes to draw.
+                    ContainerHighlight.get().turnTowardsTarget();
                     if (!ContainerHighlight.get().hasBoxes()) return;
                     // Nothing is drawn now. The node is queued and replayed in
                     // the line phase, which is why the lambda takes its own pose
@@ -57,6 +60,7 @@ public final class WorldHighlightHook {
         *///?} else {
         net.fabricmc.fabric.api.client.rendering.v1.world.WorldRenderEvents.AFTER_ENTITIES
                 .register(context -> {
+                    ContainerHighlight.get().turnTowardsTarget();
                     if (!ContainerHighlight.get().hasBoxes()) return;
                     Camera camera = context.gameRenderer().getMainCamera();
                     ContainerHighlight.get().drawBoxes(
