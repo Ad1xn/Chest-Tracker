@@ -1,6 +1,7 @@
 package dev.adrian.chesttracker.server.scan;
 
 import dev.adrian.chesttracker.ChestTracker;
+import dev.adrian.chesttracker.core.store.ScanLog;
 import dev.adrian.chesttracker.core.anvil.ChunkExtractor;
 import dev.adrian.chesttracker.core.anvil.NbtCompound;
 import dev.adrian.chesttracker.core.anvil.OriginClassifier;
@@ -12,6 +13,7 @@ import dev.adrian.chesttracker.core.util.BlockKey;
 import dev.adrian.chesttracker.server.TrackerService;
 
 import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
@@ -92,6 +94,37 @@ public final class RegionScanner {
                 containersFound.get(), chunksSkippedLoaded.get(), chunksFailed.get());
     }
 
+    private static long sizeOf(Path file) {
+        try {
+            return Files.size(file);
+        } catch (IOException e) {
+            return -1;
+        }
+    }
+
+    private static long modifiedAt(Path file) {
+        try {
+            return Files.getLastModifiedTime(file).toMillis();
+        } catch (IOException e) {
+            return -1;
+        }
+    }
+
+    private static void writeLog(ScanLog log, Path file) {
+        try {
+            log.write(file);
+        } catch (IOException e) {
+            // Losing the log costs a repeated scan, never correctness.
+            ChestTracker.LOG.warn("Could not write the scan log {}: {}", file, e.toString());
+        }
+    }
+
+    /** Forgets every region, so the next scan reads the world in full. */
+    public void forgetScanned(Path logFile) {
+        ScanLog log = new ScanLog();
+        writeLog(log, logFile);
+    }
+
     public void cancel() {
         cancelled.set(true);
         Thread current = worker;
@@ -132,6 +165,14 @@ public final class RegionScanner {
         return true;
     }
 
+    /**
+     * How often the log is written during a scan.
+     *
+     * <p>Often enough that killing the game loses seconds of work rather than
+     * minutes, rarely enough that a scan is not dominated by writing a file.
+     */
+    private static final int LOG_EVERY = 25;
+
     private void scanWorld(Path worldRoot, long tick) throws IOException {
         List<WorldLayout.DimensionRegions> dimensions = WorldLayout.discover(worldRoot);
         if (dimensions.isEmpty()) {
@@ -148,19 +189,62 @@ public final class RegionScanner {
             }
         }
         regionsTotal.set(allRegions.size());
-        ChestTracker.LOG.info("Region scan starting: {} region files across {} dimension(s)",
-                allRegions.size(), dimensions.size());
+
+        // Everything already read and unchanged since. Playing rewrites the
+        // regions the player was in, so those come back; the rest of the world
+        // does not have to be read a second time.
+        Path logFile = tracker.scanLogFile();
+        ScanLog log = ScanLog.read(logFile);
+
+        List<Path> pending = new ArrayList<>();
+        List<String> pendingOwners = new ArrayList<>();
+        for (int i = 0; i < allRegions.size(); i++) {
+            Path file = allRegions.get(i);
+            if (log.isCurrent(file.toString(), sizeOf(file), modifiedAt(file))) {
+                // Counted as read, so the progress bar measures the world and
+                // not the leftovers - a resumed scan should look nearly done.
+                regionsRead.incrementAndGet();
+                continue;
+            }
+            pending.add(file);
+            pendingOwners.add(owners.get(i));
+        }
+
+        ChestTracker.LOG.info("Region scan starting: {} of {} region files need reading "
+                        + "across {} dimension(s)",
+                pending.size(), allRegions.size(), dimensions.size());
 
         Set<String> trackedIds = tracker.containerTypes().known();
 
-        for (int i = 0; i < allRegions.size() && !cancelled.get(); i++) {
-            scanRegion(allRegions.get(i), owners.get(i), trackedIds, tick);
+        int sinceWrite = 0;
+        for (int i = 0; i < pending.size() && !cancelled.get(); i++) {
+            Path file = pending.get(i);
+            // Read before the scan, not after: if the file changes while being
+            // read, marking it with the older stamp means it is read again next
+            // time rather than being wrongly believed current.
+            long size = sizeOf(file);
+            long modifiedAt = modifiedAt(file);
+
+            scanRegion(file, pendingOwners.get(i), trackedIds, tick);
             regionsRead.incrementAndGet();
+
+            log.mark(file.toString(), size, modifiedAt);
+            if (++sinceWrite >= LOG_EVERY) {
+                sinceWrite = 0;
+                writeLog(log, logFile);
+            }
         }
 
-        ChestTracker.LOG.info("Region scan {}: {} chunks, {} containers, {} failed",
+        // Written on cancellation too. That is the whole point: what was read
+        // before quitting stays read, so a world too big to scan in one sitting
+        // finishes over several.
+        writeLog(log, logFile);
+
+        ChestTracker.LOG.info("Region scan {}: {} chunks, {} containers, {} failed, "
+                        + "{} regions skipped as unchanged",
                 cancelled.get() ? "cancelled" : "complete",
-                chunksRead.get(), containersFound.get(), chunksFailed.get());
+                chunksRead.get(), containersFound.get(), chunksFailed.get(),
+                allRegions.size() - pending.size());
     }
 
     /**

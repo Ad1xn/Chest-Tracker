@@ -204,6 +204,26 @@ public final class TrackerService {
                 record.customName(), record.lastSeenTick(), contents);
     }
 
+    /**
+     * Throws away every index, so a scan rebuilds them from the world.
+     *
+     * <p>The escape hatch for an index that is wrong rather than merely
+     * incomplete. Ordinary scanning corrects and adds but never removes what
+     * it does not encounter, so a container that was recorded through some
+     * earlier bug would otherwise stay recorded forever.
+     */
+    public void clearIndexes() {
+        byDimension.clear();
+        // Every watching screen has just had the ground taken from under it,
+        // so every dimension counts as changed whether or not it had an index.
+        generations.values().forEach(java.util.concurrent.atomic.AtomicLong::incrementAndGet);
+    }
+
+    /** Where the record of already-scanned region files lives. */
+    public Path scanLogFile() {
+        return storageRoot.resolve("scanned-regions.txt");
+    }
+
     public void save() {
         for (Map.Entry<String, WorldIndex> entry : byDimension.entrySet()) {
             try {

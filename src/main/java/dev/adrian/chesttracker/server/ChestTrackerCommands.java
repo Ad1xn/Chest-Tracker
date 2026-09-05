@@ -46,7 +46,9 @@ public final class ChestTrackerCommands {
                                 .executes(ctx -> scan(ctx.getSource(),
                                         IntegerArgumentType.getInteger(ctx, "chunkRadius")))))
                 .then(Commands.literal("scanworld")
-                        .executes(ctx -> scanWorld(ctx.getSource()))
+                        .executes(ctx -> scanWorld(ctx.getSource(), false))
+                        .then(Commands.literal("override")
+                                .executes(ctx -> scanWorld(ctx.getSource(), true)))
                         .then(Commands.literal("cancel")
                                 .executes(ctx -> cancelScan(ctx.getSource()))))
                 .then(Commands.literal("access")
@@ -139,7 +141,20 @@ public final class ChestTrackerCommands {
      * Starts the background region scan: the whole world, including chunks that
      * are not loaded and never have been.
      */
-    private static int scanWorld(CommandSourceStack source) throws com.mojang.brigadier.exceptions.CommandSyntaxException {
+    /**
+     * Starts an offline scan.
+     *
+     * <p>Plain {@code scanworld} reads only the region files that have changed
+     * since the last scan, which after the first one is usually a handful.
+     *
+     * <p>{@code scanworld override} throws the index away first and reads the
+     * world from scratch. Worth knowing before using it: an ordinary scan
+     * corrects and adds but never removes what it does not encounter, so
+     * something recorded wrongly stays recorded - this is the way out of that,
+     * at the cost of leaving the world with no index until it finishes.
+     */
+    private static int scanWorld(CommandSourceStack source, boolean override)
+            throws com.mojang.brigadier.exceptions.CommandSyntaxException {
         requireTracker(source);
         RegionScanner scanner = Trackers.regionScanner();
         var server = Trackers.server();
@@ -153,6 +168,11 @@ public final class ChestTrackerCommands {
             return 0;
         }
 
+        if (override) {
+            scanner.forgetScanned(Trackers.current().scanLogFile());
+            Trackers.current().clearIndexes();
+        }
+
         Path worldRoot = server.getWorldPath(LevelResource.ROOT);
         long tick = source.getLevel().getGameTime();
         if (!scanner.start(worldRoot, tick)) {
@@ -160,9 +180,12 @@ public final class ChestTrackerCommands {
             return 0;
         }
 
-        source.sendSuccess(() -> Component.literal(
-                "Scanning the world in the background. It reads region files directly, so "
-                + "unloaded chunks are included. Check /chesttracker stats for progress."), false);
+        source.sendSuccess(() -> Component.literal(override
+                ? "Index cleared. Reading every region file again from scratch - "
+                        + "searches will be empty until this finishes."
+                : "Scanning the world in the background - only the region files that "
+                        + "changed since the last scan. Use /chesttracker scanworld override "
+                        + "to throw the index away and read everything again."), false);
         return 1;
     }
 
